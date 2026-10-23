@@ -137,10 +137,14 @@ func _process(delta: float) -> void:
 		flicker = 0.35 if int(_time * 30.0) % 3 == 0 else 1.0
 	_lamp.light_energy = 4.5 * flicker * (0.97 + 0.03 * sin(_time * 13.0))
 	_light_cone.set_shader_parameter("flicker", _lamp.light_energy / 4.5)
-	# 吊灯是个阻尼单摆（摆长约 1 米），平时有一点点气流晃动
+	# 吊灯是个阻尼单摆（摆长约 1 米），平时有一点点气流晃动。
+	# 帧间隔大（卡顿、测试里加速）时拆成最长 1/60 秒的小步积分，否则会发散成 inf/NaN
 	var idle := Vector2(sin(_time * 0.8), cos(_time * 0.55)) * 0.004
-	_swing_vel += (-(_swing - idle) * 9.0 - _swing_vel * 0.5) * delta
-	_swing += _swing_vel * delta
+	var steps := clampi(ceili(delta * 60.0), 1, 8)
+	var dt := delta / steps
+	for _i in steps:
+		_swing_vel += (-(_swing - idle) * 9.0 - _swing_vel * 0.5) * dt
+		_swing += _swing_vel * dt
 	_lamp_pivot.rotation = Vector3(_swing.x, 0, _swing.y)
 	for i in _candles.size():
 		_candles[i].light_energy = 0.75 + 0.12 * sin(_time * 9.0 + i * 2.1) + 0.08 * sin(_time * 23.0 + i * 5.3)
