@@ -66,6 +66,14 @@ const MATERIALS := {
 	"candle_glow": [Color(1, 0.62, 0.25), 1.0, 0.0, "", 3.0],
 	"sigil": [Color(0.42, 0.2, 0.2, 0.8), 0.95, 0.0, "sigil", 0.0],
 	"scrawl": [Color(0.55, 0.3, 0.3, 0.9), 0.95, 0.0, "scrawl", 0.0],
+	"eye_wet": [Color(0.05, 0.015, 0.015), 0.08, 0.0, "", 0.0],
+	# 行刑人三个形态的部件
+	"porcelain": [Color(0.82, 0.8, 0.76), 0.45, 0.0, "", 0.0],
+	"hat": [Color(0.45, 0.45, 0.5), 0.35, 0.0, "cloth", 0.0],
+	"bone": [Color(0.78, 0.72, 0.58), 0.5, 0.0, "", 0.0],
+	"vein_glow": [Color(0.45, 1.0, 0.5), 1.0, 0.0, "", 1.4],
+	"eye_white": [Color(0.85, 0.8, 0.62), 0.2, 0.0, "", 0.0],
+	"iris_glow": [Color(1.0, 0.45, 0.1), 1.0, 0.0, "", 2.4],
 }
 
 static var _cache := {}
@@ -138,8 +146,8 @@ static func material(key: String) -> StandardMaterial3D:
 			m = glow(spec[0], energy)
 		else:
 			m = mat(spec[0], spec[1], spec[2], pixel_texture(tex_name) if tex_name != "" else null)
-		if key == "skin":
-			# 行刑人头部的眼窝、口腔、缝线是烘焙在顶点色里的明暗；没有顶点色的网格按白色处理
+		if key in ["skin", "porcelain"]:
+			# 行刑人头部的眼窝、口腔、缝线（面具上画的眼线、笑和裂纹）是烘焙在顶点色里的；没有顶点色的网格按白色处理
 			m.vertex_color_use_as_albedo = true
 		elif key in ["slot", "sigil", "scrawl"]:
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -182,6 +190,48 @@ static func hull_material(live: bool, glowing := false) -> StandardMaterial3D:
 		m.emission_energy_multiplier = 1.6
 	_cache[key] = m
 	return m
+
+
+## 溅血贴图（白色，用材质颜色染色）：一团不规则的血斑、往外甩的尖刺和四周的小血点（程序生成，48×48）
+## @keyword-cn 溅血贴图, 血斑
+## @keyword-en blood-splat, splatter-texture
+static func blood_splat_texture() -> ImageTexture:
+	if _cache.has("blood_splat"):
+		return _cache["blood_splat"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	var img := Image.create(48, 48, false, Image.FORMAT_RGBA8)
+	var center := Vector2(24, 24)
+	var lobes := []
+	for _k in 7:
+		lobes.append([rng.randf() * TAU, rng.randf_range(0.15, 0.4)])
+	for y in 48:
+		for x in 48:
+			var d := Vector2(x, y) - center
+			var a := d.angle()
+			var r := 9.0
+			for lobe in lobes:
+				r += 4.0 * lobe[1] * cos(a * 3.0 + lobe[0]) + 3.0 * lobe[1] * cos(a * 7.0 + lobe[0] * 2.0)
+			if d.length() < r:
+				img.set_pixel(x, y, Color(1, 1, 1, 1))
+	for _k in 9:
+		var dir := Vector2.from_angle(rng.randf() * TAU)
+		var length := rng.randf_range(6.0, 13.0)
+		for t in int(length):
+			var p := center + dir * (9.0 + t)
+			if p.x >= 0 and p.y >= 0 and p.x < 48 and p.y < 48:
+				img.set_pixelv(Vector2i(p), Color(1, 1, 1, 1))
+	for _k in 16:
+		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(13.0, 22.0)
+		var size := rng.randi_range(1, 2)
+		for dy in size:
+			for dx in size:
+				var q := Vector2i(p) + Vector2i(dx, dy)
+				if q.x >= 0 and q.y >= 0 and q.x < 48 and q.y < 48:
+					img.set_pixelv(q, Color(1, 1, 1, 1))
+	var tex := ImageTexture.create_from_image(img)
+	_cache["blood_splat"] = tex
+	return tex
 
 
 ## 加载 art/textures/ 下的像素贴图

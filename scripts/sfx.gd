@@ -44,6 +44,17 @@ func _ready() -> void:
 	_streams["lose"] = _to_stream(_lose())
 	_streams["thud"] = _to_stream(_thud())
 	_streams["tick"] = _to_stream(_tick())
+	_streams["splat"] = _to_stream(_splat())
+	# 行刑人中弹的嘶叫：三个形态一个比一个低沉
+	_streams["shriek1"] = _to_stream(_creature(0.75, 560.0, 380.0, 0.35, 0.35))
+	_streams["shriek2"] = _to_stream(_creature(0.85, 300.0, 190.0, 0.5, 0.2))
+	_streams["shriek3"] = _to_stream(_creature(1.0, 130.0, 80.0, 0.65, 0.1))
+	_streams["roar"] = _to_stream(_creature(1.6, 110.0, 70.0, 0.6, 0.08))
+	_streams["rumble"] = _to_stream(_rumble())
+	_streams["shatter"] = _to_stream(_shatter())
+	_streams["squelch"] = _to_stream(_squelch())
+	_streams["ring"] = _to_stream(_ring())
+	_streams["heartbeat"] = _to_stream(_heartbeat())
 	_build_music_bus()
 	for i in 6:
 		var p := AudioStreamPlayer.new()
@@ -280,4 +291,111 @@ func _tick() -> PackedFloat32Array:
 	for i in out.size():
 		var t := float(i) / RATE
 		out[i] = _clack(t, 3200.0) * 0.6 + sin(TAU * 1100.0 * t) * exp(-t * 90.0) * 0.5
+	return out
+
+
+## 打进肉里的闷响：低频一撞加一团湿漉漉的噪声
+## @keyword-cn 血肉闷响, 中弹声
+## @keyword-en flesh-impact, splat-sound
+func _splat() -> PackedFloat32Array:
+	var out := _buffer(0.35)
+	var lp := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		lp += 0.25 * (_noise() - lp)
+		out[i] = sin(TAU * (95.0 - 60.0 * t) * t) * exp(-t * 14.0) + lp * exp(-t * 11.0) * 1.4
+	return out
+
+
+## 怪物的嘶叫：锯齿波从 f_from 滑到 f_to，带颤音、粗糙的随机抖动（rough）和气声，
+## 再过一个单极点低通（lp 越小越闷）。行刑人三个形态的叫声和变身时的咆哮都用它
+## @keyword-cn 怪物嘶叫, 咆哮
+## @keyword-en creature-shriek, roar
+func _creature(seconds: float, f_from: float, f_to: float, rough: float, lp: float) -> PackedFloat32Array:
+	var out := _buffer(seconds)
+	var phase := 0.0
+	var jitter := 0.0
+	var low := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var k := t / seconds
+		jitter += 0.002 * (_noise() - jitter * 0.01)
+		var f := lerpf(f_from, f_to, k) * (1.0 + 0.06 * sin(TAU * 7.0 * t) + rough * 0.15 * jitter)
+		phase = fmod(phase + f / RATE, 1.0)
+		var raw := (2.0 * phase - 1.0) + 0.5 * signf(sin(TAU * phase * 2.0)) + rough * _noise() * 0.6
+		low += lp * (raw - low)
+		var env := minf(t / 0.03, 1.0) * pow(1.0 - k, 1.5)
+		out[i] = low * env
+	return out
+
+
+## 变身前的地鸣：很低的隆隆声慢慢涌上来再退下去
+## @keyword-cn 地鸣, 低频隆隆
+## @keyword-en rumble, low-drone
+func _rumble() -> PackedFloat32Array:
+	var out := _buffer(2.2)
+	var lp := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		lp += 0.01 * (_noise() - lp)
+		out[i] = (lp * 8.0 + 0.4 * sin(TAU * 41.0 * t)) * sin(PI * t / 2.2)
+	return out
+
+
+## 白瓷碎裂：几下错开的清脆噪声和高频的叮当
+## @keyword-cn 瓷器碎裂, 碎片声
+## @keyword-en porcelain-shatter, break-sound
+func _shatter() -> PackedFloat32Array:
+	var out := _buffer(0.7)
+	var hits := [0.0, 0.05, 0.09, 0.16, 0.27, 0.4]
+	var pitches := [3100.0, 4700.0, 3900.0, 5600.0, 4300.0, 6100.0]
+	var hp := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var n := _noise()
+		hp += 0.5 * (n - hp)
+		var v := 0.0
+		for h in hits.size():
+			var lt: float = t - hits[h]
+			if lt >= 0.0:
+				v += ((n - hp) * exp(-lt * 70.0) + 0.5 * sin(TAU * pitches[h] * lt) * exp(-lt * 25.0)) / (1.0 + h * 0.3)
+		out[i] = v
+	return out
+
+
+## 触手长出来的湿黏声：被低频随机起伏调制的闷噪声
+## @keyword-cn 湿黏声, 触手生长
+## @keyword-en squelch, tentacle-grow
+func _squelch() -> PackedFloat32Array:
+	var out := _buffer(1.2)
+	var lp := 0.0
+	var wob := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		lp += 0.08 * (_noise() - lp)
+		wob += 0.0015 * (_noise() - wob)
+		out[i] = lp * clampf(0.3 + wob * 40.0, 0.0, 1.0) * sin(PI * t / 1.2)
+	return out
+
+
+## 中弹后的耳鸣：一声细细的高频，两个频率差一点点所以有轻微的拍音，慢慢消失
+## @keyword-cn 耳鸣, 高频鸣响
+## @keyword-en tinnitus, ear-ring
+func _ring() -> PackedFloat32Array:
+	var out := _buffer(2.4)
+	for i in out.size():
+		var t := float(i) / RATE
+		out[i] = (sin(TAU * 3600.0 * t) + 0.6 * sin(TAU * 3607.0 * t)) * minf(t / 0.08, 1.0) * exp(-t * 1.4)
+	return out
+
+
+## 心跳：咚——咚两下
+## @keyword-cn 心跳, 心跳声
+## @keyword-en heartbeat, pulse
+func _heartbeat() -> PackedFloat32Array:
+	var out := _buffer(0.7)
+	for i in out.size():
+		var t := float(i) / RATE
+		var dub := t - 0.24
+		out[i] = sin(TAU * 52.0 * t) * exp(-t * 22.0) + (sin(TAU * 64.0 * dub) * exp(-dub * 26.0) * 0.8 if dub > 0.0 else 0.0)
 	return out

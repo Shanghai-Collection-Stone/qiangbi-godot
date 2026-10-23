@@ -28,10 +28,13 @@ var _aiming := false
 var _turn_left := 0.0
 var _turn_timing := false
 var _fade := 0.0
+## 顿帧进行中（不叠加，避免把放慢后的倍率当成正常倍率记下来）
+var _hit_stopping := false
 var _log_lines: Array[String] = []
 
 var scene: TableScene
 var post: ShaderMaterial
+var blood: BloodOverlay
 var sfx: Sfx
 var crt: CrtPanel
 var subtitle: RichTextLabel
@@ -106,6 +109,11 @@ func _build_ui() -> void:
 	scene.item_clicked.connect(_on_item_clicked)
 	scene.gun_clicked.connect(_on_gun_clicked)
 	scene.hover_changed.connect(func(text: String) -> void: hover_label.text = text)
+
+	# 中弹时糊在镜头上的血：盖在 3D 画面上、在界面文字下面
+	blood = BloodOverlay.new()
+	blood.set_anchors_preset(PRESET_FULL_RECT)
+	add_child(blood)
 
 	crt = CrtPanel.new()
 	crt.position = Vector2(8, 8)
@@ -317,6 +325,7 @@ func _start_game() -> void:
 ## @keyword-en game-over, result-screen
 func _game_over(win: bool) -> void:
 	_set_player_input(false)
+	post.set_shader_parameter("hurt", 0.0)
 	crt.visible = false
 	log_panel.visible = false
 	hover_label.text = ""
@@ -344,6 +353,9 @@ func _run_game() -> void:
 	_log_lines.clear()
 	log_box.text = ""
 	_set_fade(0.0)
+	post.set_shader_parameter("hurt", 0.0)
+	blood.clear()
+	scene.reset_game()
 	crt.visible = true
 	log_panel.visible = true
 	for r in GameState.ROUNDS.size():
@@ -352,9 +364,11 @@ func _run_game() -> void:
 		_refresh()
 		_say("")
 		_log("[color=#c9a227]—— 第%s局 ——[/color]" % CN_NUM[r])
-		var sub := "双方生命 %d · 每次装弹发放 %d 件道具" % [state.max_hp, GameState.ROUNDS[r]["items"]]
+		var form_name: String = TableScene.FORM_STYLE[scene.dealer_form]["name"]
+		var sub := "行刑人·%s · 双方生命 %d · 每次装弹发放 %d 件道具" % [
+			form_name, state.max_hp, GameState.ROUNDS[r]["items"]]
 		if GameState.ROUNDS[r]["items"] == 0:
-			sub = "双方生命 %d · 没有道具，只有运气" % state.max_hp
+			sub = "行刑人·%s · 双方生命 %d · 没有道具，只有运气" % [form_name, state.max_hp]
 		await _banner("第%s局" % CN_NUM[r], sub)
 		while not state.round_over:
 			if state.needs_reload():
@@ -370,7 +384,28 @@ func _run_game() -> void:
 			return
 		if not state.is_final_round():
 			await _banner("你活过了第%s局" % CN_NUM[r], "……但这还没有结束。")
+			await _transform_dealer(mini(scene.dealer_form + 1, TableScene.FORM_NODES.size()))
+	await scene.dealer_final_death()
 	_game_over(true)
+
+
+## 行刑人这条命没了，换成下一个形态：音乐压闷，灯灭、变身，灯亮时按新形态的颜色闪一下，再加一声嘶吼
+## @keyword-cn 行刑人变身, 换形态
+## @keyword-en dealer-transform, next-life
+func _transform_dealer(form: int) -> void:
+	crt.set_turn("……")
+	_say("[color=#6fd08a]灯灭了。黑暗里，有什么东西在长出来。[/color]")
+	sfx.muffle_music(true, 0.6)
+	await scene.transform_to(form)
+	var style: Dictionary = TableScene.FORM_STYLE[form]
+	_flash(Color(style["eye_turn"], 0.5), 0.6)
+	_aberration_kick(5.0)
+	sfx.muffle_music(false, 1.5)
+	var text := "行刑人换了一副样子——「%s」。" % style["name"]
+	_say("[color=#e5533d]%s[/color]" % text)
+	_log("[color=#e5533d]%s[/color]" % text)
+	_refresh()
+	await _wait(1.2)
 
 
 ## 装弹演出：公布实弹/空包弹数、子弹立桌上再装进枪，然后两边各自摆上新发的道具
@@ -581,11 +616,10 @@ func _present_shot(res: Dictionary) -> void:
 		scene.fire(res["sawed"])
 		text = "砰！是%s。%s失去 %d 点生命。" % [LIVE, _name(target), res["damage"]]
 		if target == P:
-			await _player_hit_fx()
+			await _player_hit_fx(res["damage"])
 		else:
 			sfx.muffle_music(false, 0.15)
-			_flash(Color(1, 0.95, 0.85, 0.7), 0.35)
-			scene.dealer_hit()
+			_dealer_hit_fx(res["damage"])
 	else:
 		sfx.play("click")
 		sfx.muffle_music(false, 0.6)
@@ -608,13 +642,32 @@ func _present_shot(res: Dictionary) -> void:
 	await scene.gun_to("rest", 0.5)
 
 
-## 玩家中弹：白光，黑屏片刻（音乐一直闷着），再带着红色醒来、音乐慢慢回来
+## 行刑人中弹：顿帧、闪白、色差猛地一抖；场景里喷血、后仰、触手抽搐，加上血肉闷响和这个形态的嘶叫
+## @keyword-cn 行刑人中弹, 受击演出
+## @keyword-en dealer-hit-fx, impact-feedback
+func _dealer_hit_fx(damage: int) -> void:
+	_hit_stop(0.06 + 0.04 * damage)
+	_flash(Color(1, 0.95, 0.85, 0.35), 0.2)
+	_aberration_kick(3.0 + 1.5 * damage)
+	scene.dealer_hit(damage)
+	sfx.play("splat")
+	sfx.play("shriek%d" % scene.dealer_form, -3.0)
+
+
+## 玩家中弹：顿帧、白光，镜头被打得一仰一歪，血糊上镜头，耳鸣；黑屏片刻里只听得见心跳（音乐一直闷着），
+## 再带着红色醒来、音乐慢慢回来
 ## @keyword-cn 玩家中弹, 黑屏醒来
 ## @keyword-en player-hit, blackout-wake
-func _player_hit_fx() -> void:
+func _player_hit_fx(damage: int) -> void:
+	_hit_stop(0.05)
 	_flash(Color(1, 1, 1, 1), 0.12)
-	scene.shake(0.06)
+	scene.player_hit(damage)
+	blood.splash(damage)
+	_aberration_kick(6.0)
+	sfx.play("splat", -4.0)
+	sfx.play("ring", -14.0)
 	await _tween_fade(1.0, 0.1)
+	sfx.play("heartbeat", -2.0)
 	await _wait(0.7)
 	_flash(Color(0.75, 0.0, 0.0, 0.6), 0.9)
 	sfx.muffle_music(false, 1.5)
@@ -626,7 +679,31 @@ func _announce_death() -> void:
 	var text := "[color=#ff5a45]%s倒下了。[/color]" % _name(loser)
 	_say(text)
 	_log(text)
+	if loser == D:
+		await scene.dealer_die()
 	await _wait(1.0)
+
+
+## 顿帧：中弹那一下整个世界放慢到 5%，按真实时间过 seconds 秒后恢复（恢复成原来的倍率，测试里的加速不受影响）
+## @keyword-cn 顿帧, 打击停顿
+## @keyword-en hit-stop, impact-freeze
+func _hit_stop(seconds: float) -> void:
+	if _hit_stopping:
+		return
+	_hit_stopping = true
+	var normal := Engine.time_scale
+	Engine.time_scale = normal * 0.05
+	await get_tree().create_timer(seconds, true, false, true).timeout
+	Engine.time_scale = normal
+	_hit_stopping = false
+
+
+## 色差猛地一抖再回到平时的 0.9
+## @keyword-cn 色差抖动, 冲击感
+## @keyword-en aberration-kick, impact-distortion
+func _aberration_kick(strength: float) -> void:
+	create_tween().tween_method(func(a: float) -> void: post.set_shader_parameter("aberration", a),
+		strength, 0.9, 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func _flash(color: Color, duration: float) -> void:
@@ -668,7 +745,9 @@ func _wait(seconds: float) -> void:
 func _refresh() -> void:
 	if state == null:
 		return
-	crt.show_state(state, "第%s局" % CN_NUM[state.round_index])
+	crt.show_state(state, "第%s局·%s" % [CN_NUM[state.round_index], TableScene.FORM_STYLE[scene.dealer_form]["name"]])
+	# 只剩最后一点生命：画面四周随心跳泛红
+	post.set_shader_parameter("hurt", 1.0 if state.hp[P] == 1 and state.max_hp > 1 else 0.0)
 	scene.set_sawed(state.saw_active)
 	scene.set_cuffed(D, state.cuffs[D] != GameState.CUFF_NONE)
 	scene.set_cuffed(P, state.cuffs[P] != GameState.CUFF_NONE)

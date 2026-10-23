@@ -490,6 +490,12 @@ def export_glb(objs, rel_path, vertex_color="MATERIAL"):
         o = stack.pop()
         o.select_set(True)
         stack.extend(o.children)
+        # 用 bmesh 图层建的颜色属性只是「活动」不是「默认渲染」色；不补上的话导出器会先写一层全白的 COLOR_0，
+        # 真正的数据落到 COLOR_1，而 Godot 只读 COLOR_0（面具彩绘、触手摆动参数都会丢）
+        if o.type == "MESH":
+            colors = o.data.color_attributes
+            if colors.active_color_name and colors.default_color_name != colors.active_color_name:
+                colors.default_color_name = colors.active_color_name
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True, export_apply=True,
                               export_yup=True, export_image_format="NONE", export_materials="EXPORT",
                               export_cameras=False, export_lights=False, export_extras=False,

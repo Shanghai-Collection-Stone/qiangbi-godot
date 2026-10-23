@@ -13,11 +13,12 @@ scripts · 游戏逻辑与 3D 场景
 - `game_state.gd` — 纯规则：子弹、生命、道具、回合、手铐，不依赖节点；公开计数和实弹概率会算上被反转器翻过的子弹。
 - `dealer_ai.gd` — 行刑人 AI，只用公开信息决策；按实弹概率和自己的生命决定打谁，不会在五五开或低血量时赌自己。
 - `items.gd` — 道具 id、名称、说明。
-- `main.gd` — 游戏流程（async/await）、像素 HUD（开枪选项、记录框）、菜单、后期特效调度。
-- `table_scene.gd` — 3D 场景：房间（墙缝绿光、蜡烛灯）、吊灯（摆动、光锥、浮尘）、行刑人（触手须受击变红）、枪、子弹、道具的摆放、动画、枪口火光与硝烟、鼠标拾取。
+- `main.gd` — 游戏流程（async/await）、像素 HUD（开枪选项、记录框）、菜单、后期特效调度；局与局之间行刑人变身，受击时的顿帧、色差、屏幕溅血和低血量泛红。
+- `table_scene.gd` — 3D 场景：房间（墙缝绿光、蜡烛灯）、吊灯（摆动、光锥、浮尘）、行刑人（三个形态、绕髋部前后仰的上身、受击喷血/后仰/触手抽搐/伤口、倒下与变身演出）、枪、子弹、道具的摆放、动画、枪口火光与硝烟、鼠标拾取、玩家中弹时镜头歪斜。
 - `props.gd` — 材质表 `MATERIALS`、触手摆动材质、按材质名给 glb 换材质的 `model()`、霰弹枪/霰弹/道具/行刑人模型入口。
 - `crt_panel.gd` — 左上角荧光屏计分板，最下面一行是回合倒计时。
-- `sfx.gd` — 程序合成音效；背景音乐（`art/music/` 的 CC0 曲目）的播放、交叉淡入淡出和低通压闷。
+- `sfx.gd` — 程序合成音效（含行刑人三个形态的嘶叫、变身的地鸣/碎裂/湿黏声、玩家中弹的耳鸣和心跳）；背景音乐（`art/music/` 的 CC0 曲目）的播放、交叉淡入淡出和低通压闷。
+- `blood_overlay.gd` — 玩家中弹时糊在镜头上的像素血（`shaders/blood_overlay.gdshader`）：每次中弹现画遮罩，血斑多在画面四周，血痕往下淌，几秒后淡掉。
 
 ## 函数清单 (Function List)
 
@@ -35,6 +36,7 @@ scripts · 游戏逻辑与 3D 场景
 - `props.shell(live, glowing)` — 一发霰弹：实弹红、空包弹蓝；glowing 时自发光 | keywords: shotgun-shell, shell-model, 霰弹, 子弹模型
 - `props.item(id)` — 道具模型，id 见 Items | keywords: item-model, table-item, 道具模型, 桌面道具
 - `props.dealer(skin, pupil, tentacle)` — 行刑人：椅子、身体、头（Head，带瞳孔 Pupil*、触手须）、两只手（HandL/HandR）和两条袖子（ArmL/ArmR，由场景每帧摆放） | keywords: dealer, dealer-model, 行刑人, 庄家模型
+- `props.blood_splat_texture()` — 溅血贴图（白色，用材质颜色染色）：一团不规则的血斑、往外甩的尖刺和四周的小血点（程序生成，48×48） | keywords: blood-splat, splatter-texture, 溅血贴图, 血斑
 - `table_scene._process(delta)` — 每帧：吊灯闪烁与摆动、光锥跟着闪、行刑人头部和手臂、镜头晃动 | keywords: frame-update, lamp-swing, 每帧更新, 吊灯摆动
 - `table_scene._build_environment()` — 黑色背景、偏青的环境光、距离雾，自发光物体带柔光 | keywords: world-environment, glow-bloom, 环境设置, 柔光
 - `table_scene._build_room()` — 房间模型（地砖、墙、管道、门、音箱、海报、木箱、墙缝触手、排水口触手、蜡烛、血字），门上红灯、冷色补光、墙缝绿光和蜡烛灯 | keywords: room-model, fill-light, 房间模型, 补光
@@ -53,6 +55,23 @@ scripts · 游戏逻辑与 3D 场景
 - `table_scene._tucked(butt, target)` — 托底板放在 butt、枪口朝 target 的枪变换 | keywords: butt-placement, shouldered-aim, 枪托定位, 持枪瞄准
 - `table_scene.gun_to(pose, duration)` — 枪换到某个姿势。行刑人的姿势：先伸手握住枪再一起动，换姿势时两只手在握持点之间平滑换手； | keywords: move-gun, hold-animation, 移动枪, 握枪动画
 - `table_scene.fire(sawed)` — 开枪演出：火光、枪口灯、硝烟、吊灯被震得摆起来、镜头震动和后坐 | keywords: fire-effects, recoil, 开枪演出, 后坐
+- `table_scene._lean_transform()` — 躯干前后仰的变换：绕髋部支点 HIP_PIVOT 转 _lean | keywords: lean-transform, torso-pivot, 躯干变换, 后仰变换
+- `table_scene._place_dealer_parts(lean)` — 跟着躯干前后仰的部件，胸口之眼一直盯着镜头；正在长出来（或缩回去）的形态部件按 _grow 缩放 | keywords: place-torso-parts, part-growth, 摆放躯干部件, 部件生长
+- `table_scene._build_blood()` — 行刑人中弹喷出来的血滴和一团血雾（颜色按形态在喷之前设置） | keywords: blood-particles, blood-droplets, 血雾粒子, 血滴粒子
+- `table_scene.set_dealer_form(form)` — 切换到某个形态：只显示这个形态的部件（立刻切换，不演出；演出见 transform_to） | keywords: set-form, show-parts, 切换形态, 显示部件
+- `table_scene.reset_game()` — 新开一盘：回到第一形态，扶正身体、点亮灯，清掉桌上的碎片 | keywords: reset-game, reset-dealer, 新开一盘, 重置行刑人
+- `table_scene.dealer_hit(damage)` — 行刑人中弹：头往后一甩、整个上身后仰再弹回来、皮肤和触手泛红、触手剧烈抽搐、瞳孔一亮、 | keywords: dealer-hit, hit-reaction, 行刑人受击, 受击反应
+- `table_scene._spray_blood(at, heavy)` — 头上喷出血滴和血雾：颜色按形态，第三形态的体液发光（不受光照、亮度超过 1 会带柔光） | keywords: spray-blood, ichor-color, 喷血, 体液颜色
+- `table_scene._splat_behind(heavy)` — 椅背上、行刑人身后溅一片血（留到这条命结束） | keywords: splat-behind, blood-decal, 椅背溅血, 血迹
+- `table_scene._add_wound()` — 头上留一个伤口：第一形态打在面具上（瓷面上一个黑洞），之后打在皮肉上（暗色的血窟窿） | keywords: head-wound, damage-mark, 伤口, 受伤痕迹
+- `table_scene._face_z(x, y)` — 头部基本形正面 (x, y) 处的 z（头部局部坐标）：和 art/blender/build_dealer.py 的 head_base 是同一个公式 | keywords: face-depth, head-base-shape, 脸面深度, 头部基本形
+- `table_scene.player_hit(damage)` — 玩家中弹：镜头被打得往上一仰、歪向一边，然后晕乎乎地慢慢晃回来 | keywords: player-hit-camera, camera-knock, 玩家受击镜头, 镜头歪斜
+- `table_scene.dealer_die()` — 这条命没了：触手一阵抽搐，上身往前栽、头垂下来、瞳孔熄灭 | keywords: dealer-die, life-lost, 行刑人倒下, 一条命结束
+- `table_scene.transform_to(form)` — 换成下一个形态（下一条命）：吊灯闪几下灭掉，墙缝里的绿光涌出来；黑暗里旧形态的面具碎成片掉在桌上、 | keywords: transform-sequence, next-form, 变身演出, 下一形态
+- `table_scene.dealer_final_death()` — 最后一条命也没了：倒下以后背后的触手、长触手须和胸口之眼枯萎缩回去，发光的血管熄灭，上身再往下栽 | keywords: final-death, wither, 最终死亡, 触手枯萎
+- `table_scene._flicker_lamp(levels, step)` — 吊灯按 levels 依次跳到这些亮度，每一下停 step 秒（灯泡接触不良那种闪） | keywords: lamp-flicker, light-stutter, 吊灯闪烁, 灯光明灭
+- `table_scene._drop_hat()` — 礼帽从头上飞走，翻着跟头落到椅子后面 | keywords: hat-flies-off, drop-hat, 礼帽飞走, 掉帽子
+- `table_scene._shatter_mask(node_name, count)` — 面具碎成 count 片：从脸上迸开，翻滚着落到行刑人面前的桌上，一直留到这盘游戏结束 | keywords: mask-shards, shatter, 面具碎片, 碎裂
 - `main._process(delta)` — 回合倒计时：只在等玩家操作（点道具、点枪、选开枪对象）时走，道具演出期间暂停 | keywords: countdown-tick, turn-timeout, 倒计时更新, 超时
 - `main._on_turn_timeout()` — 时间到：枪替玩家随机选一个对象开火 | keywords: timeout-shot, random-target, 超时开枪, 随机目标
 - `main._aim_button(parent, text, font_size, min_size, callback)` — 开枪选项按钮：放进容器里由容器排版，min_size 统一宽度 | keywords: aim-button, option-layout, 开枪按钮, 选项排版
@@ -61,7 +80,7 @@ scripts · 游戏逻辑与 3D 场景
 - `main._do_load()` — 装弹演出：公布实弹/空包弹数、子弹立桌上再装进枪，然后两边各自摆上新发的道具 | keywords: reload-sequence, deal-items, 装弹演出, 发放道具
 - `main._player_turn()` — 玩家回合：每回合 TURN_SECONDS 秒（只在等玩家操作时走），用道具不换回合，开一枪结束回合 | keywords: player-turn, turn-timer, 玩家回合, 回合计时
 - `main._present_shot(res)` — 开枪演出：举枪、瞄准（音乐压闷）、开枪或空响（音乐放开）、拉枪栓、放下枪 | keywords: shot-sequence, suspense, 开枪流程, 紧张感
-- `main._player_hit_fx()` — 玩家中弹：白光，黑屏片刻（音乐一直闷着），再带着红色醒来、音乐慢慢回来 | keywords: player-hit, blackout-wake, 玩家中弹, 黑屏醒来
+- `main._player_hit_fx(damage)` — 玩家中弹：顿帧、白光，镜头被打得一仰一歪，血糊上镜头，耳鸣；黑屏片刻里只听得见心跳（音乐一直闷着）， | keywords: player-hit, blackout-wake, 玩家中弹, 黑屏醒来
 - `main._log(text)` — 记录框不滚动：从最旧的一条开始删，直到全部内容放得下，最新的一条总是完整可见 | keywords: log-panel, latest-message, 记录框, 最新消息
 - `sfx._exit_tree()` — 退出时停掉音乐、放掉曲子，否则正在播放的 OGG 会在退出时报资源未释放 | keywords: stop-music, exit-cleanup, 停止音乐, 退出清理
 - `sfx._build_music_bus()` — Music 总线（带低通滤波器）和音乐播放器 | keywords: music-bus, lowpass-filter, 音乐总线, 低通滤波器
@@ -69,11 +88,24 @@ scripts · 游戏逻辑与 3D 场景
 - `sfx.muffle_music(on, duration)` — 把音乐压低成闷声（低通 + 降音量），用在扣扳机前那一下的紧张感；on 为 false 时恢复 | keywords: muffle-music, lowpass-duck, 音乐压低, 低通滤波
 - `sfx._set_cutoff(t, from_hz, to_hz)` — 低通截止频率按对数插值，听起来扫得均匀 | keywords: cutoff-sweep, log-interpolation, 截止频率, 对数插值
 - `sfx._tick()` — 倒计时最后 10 秒的滴答：很短的高频咔嗒 + 一点木头共鸣 | keywords: tick-sound, clock-sound, 倒计时滴答, 钟表声
+- `sfx._splat()` — 打进肉里的闷响：低频一撞加一团湿漉漉的噪声 | keywords: flesh-impact, splat-sound, 血肉闷响, 中弹声
+- `sfx._creature(seconds, f_from, f_to, rough, lp)` — 怪物的嘶叫：锯齿波从 f_from 滑到 f_to，带颤音、粗糙的随机抖动（rough）和气声， | keywords: creature-shriek, roar, 怪物嘶叫, 咆哮
+- `sfx._rumble()` — 变身前的地鸣：很低的隆隆声慢慢涌上来再退下去 | keywords: rumble, low-drone, 地鸣, 低频隆隆
+- `sfx._shatter()` — 白瓷碎裂：几下错开的清脆噪声和高频的叮当 | keywords: porcelain-shatter, break-sound, 瓷器碎裂, 碎片声
+- `sfx._squelch()` — 触手长出来的湿黏声：被低频随机起伏调制的闷噪声 | keywords: squelch, tentacle-grow, 湿黏声, 触手生长
+- `sfx._ring()` — 中弹后的耳鸣：一声细细的高频，两个频率差一点点所以有轻微的拍音，慢慢消失 | keywords: tinnitus, ear-ring, 耳鸣, 高频鸣响
+- `sfx._heartbeat()` — 心跳：咚——咚两下 | keywords: heartbeat, pulse, 心跳, 心跳声
 - `crt_panel.set_turn(text, seconds_left, total)` — 更新倒计时行；seconds_left 小于 0 表示这一行只显示文字（比如行刑人的回合） | keywords: turn-countdown, timer-display, 回合倒计时, 计时显示
 - `crt_panel._turn_row(font, y)` — 倒计时行：左边是谁的回合，右边是剩余秒数，下面一条随时间缩短的进度条；最后 10 秒变红闪烁 | keywords: countdown-row, progress-bar, 倒计时行, 进度条
 - `game_state.live_probability(actor)` — 站在 actor 的角度，当前这一发是实弹的概率。先按公开计数（装弹时的原样）和自己知道的子弹算， | keywords: live-probability, inverter-aware, 实弹概率, 反转器
 - `game_state._reveal(live, index)` — 一发子弹被亮出来（开枪或退膛），更新公开计数。被反转过的子弹亮出来的是翻过之后的样子， | keywords: public-tally, reveal-shell, 公开计数, 亮弹
 - `dealer_ai.decide(state, me, _rng)` — 决定下一个动作。只用公开信息（公布的数量、亮出来的子弹、谁用过反转器）和自己看到的子弹 | keywords: dealer-decision, odds-based-shot, 行刑人决策, 概率开枪
+- `blood_overlay.splash(damage)` — 溅一脸血：damage 越大血斑越多越大；血痕 2.6 秒淌完，2 秒后开始淡出 | keywords: splash-blood, hit-splash, 溅血, 中弹溅血
+- `blood_overlay.clear()` — 立刻擦干净（新开一盘时） | keywords: clear-blood, wipe, 擦掉血, 清屏
+- `blood_overlay._paint(damage)` — 画遮罩：R = 血斑，G = 血痕流到这里的时刻（0..1），B = 明暗 | keywords: paint-mask, drip-lines, 画血斑, 血痕
+- `blood_overlay._edge_point()` — 画面四周随机一点：上下各 30 像素、左右各 50 像素的边带 | keywords: edge-point, border-band, 边缘取点, 四周
+- `blood_overlay._blob(img, center, r)` — 一团边缘起伏的血斑，左上一侧亮一点像湿的高光 | keywords: blood-blob, wet-highlight, 屏幕血斑, 湿润高光
+- `blood_overlay._drip(img, start, length)` — 一道往下淌的血痕：每个像素记下血流到这里的时刻 | keywords: drip-line, arrival-time, 血痕下淌, 流淌时刻
 
 ## 关键词索引 (Keyword Index)
 
@@ -205,15 +237,90 @@ scripts · 游戏逻辑与 3D 场景
 | 倒计时 | countdown |
 | 自残阈值 | self-shot-threshold |
 | 风险控制 | risk-control |
+| 躯干变换 | lean-transform |
+| 后仰变换 | torso-pivot |
+| 摆放躯干部件 | place-torso-parts |
+| 部件生长 | part-growth |
+| 血雾粒子 | blood-particles |
+| 血滴粒子 | blood-droplets |
+| 切换形态 | set-form |
+| 显示部件 | show-parts |
+| 新开一盘 | reset-game |
+| 重置行刑人 | reset-dealer |
+| 行刑人受击 | dealer-hit |
+| 受击反应 | hit-reaction |
+| 喷血 | spray-blood |
+| 体液颜色 | ichor-color |
+| 椅背溅血 | splat-behind |
+| 血迹 | blood-decal |
+| 伤口 | head-wound |
+| 受伤痕迹 | damage-mark |
+| 脸面深度 | face-depth |
+| 头部基本形 | head-base-shape |
+| 玩家受击镜头 | player-hit-camera |
+| 镜头歪斜 | camera-knock |
+| 行刑人倒下 | dealer-die |
+| 一条命结束 | life-lost |
+| 变身演出 | transform-sequence |
+| 下一形态 | next-form |
+| 最终死亡 | final-death |
+| 触手枯萎 | wither |
+| 吊灯闪烁 | lamp-flicker |
+| 灯光明灭 | light-stutter |
+| 礼帽飞走 | hat-flies-off |
+| 掉帽子 | drop-hat |
+| 面具碎片 | mask-shards |
+| 碎裂 | shatter |
+| 行刑人变身 | dealer-transform |
+| 换形态 | next-life |
+| 行刑人中弹 | dealer-hit-fx |
+| 受击演出 | impact-feedback |
+| 顿帧 | hit-stop |
+| 打击停顿 | impact-freeze |
+| 色差抖动 | aberration-kick |
+| 冲击感 | impact-distortion |
+| 血肉闷响 | flesh-impact |
+| 中弹声 | splat-sound |
+| 怪物嘶叫 | creature-shriek |
+| 咆哮 | roar |
+| 地鸣 | rumble |
+| 低频隆隆 | low-drone |
+| 瓷器碎裂 | porcelain-shatter |
+| 碎片声 | break-sound |
+| 湿黏声 | squelch |
+| 触手生长 | tentacle-grow |
+| 耳鸣 | tinnitus |
+| 高频鸣响 | ear-ring |
+| 心跳 | heartbeat |
+| 心跳声 | pulse |
+| 溅血贴图 | blood-splat |
+| 血斑 | splatter-texture |
+| 溅血 | splash-blood |
+| 中弹溅血 | hit-splash |
+| 擦掉血 | clear-blood |
+| 清屏 | wipe |
+| 画血斑 | paint-mask |
+| 血痕 | drip-lines |
+| 边缘取点 | edge-point |
+| 四周 | border-band |
+| 屏幕血斑 | blood-blob |
+| 湿润高光 | wet-highlight |
+| 血痕下淌 | drip-line |
+| 流淌时刻 | arrival-time |
 
 ## 类型导出 (Type Exports)
 
 - `Props`（class_name）— `MODEL_DIR` / `TEXTURE_DIR`（资源目录，keywords: asset-dir, model-dir, 资源目录, 模型目录）、`TENTACLE_SHADER`（keywords: tentacle-shader, vertex-animation, 触手着色器, 顶点动画）、`MATERIALS`（材质 key → [颜色, 粗糙度, 金属度, 贴图名, 自发光强度]，keywords: material-spec, material-key, 材质规格, 材质键）。
-- `TableScene`（class_name）— 信号 `item_clicked(index)`、`gun_clicked`、`hover_changed(text)`；常量 `LAMP_POS` / `LAMP_PIVOT`（keywords: lamp-position, lamp-pivot, 吊灯位置, 挂点）、`LIGHT_CONE_SHADER`（keywords: light-cone-shader, fake-volumetric, 光锥着色器, 体积光）、`CANDLE_LIGHTS` / `CRACK_LIGHT_POS`（keywords: candle-lights, crack-glow, 蜡烛灯光, 墙缝绿光）、`UPPER_ARM` / `FOREARM` / `ELBOW_POLES`（keywords: arm-length, elbow-pole, 手臂长度, 肘部方向）、`BUTT` / `PISTOL_GRIP` / `PISTOL_GRIP_AXIS` / `BARREL_GRIP`（keywords: gun-butt, grip-point, 枪托位置, 握把位置）、`DEALER_GRIPS`（每个行刑人持枪姿势两只手握哪里）。
+- `TableScene`（class_name）— 信号 `item_clicked(index)`、`gun_clicked`、`hover_changed(text)`；常量 `LAMP_POS` / `LAMP_PIVOT`（keywords: lamp-position, lamp-pivot, 吊灯位置, 挂点）、`LIGHT_CONE_SHADER`（keywords: light-cone-shader, fake-volumetric, 光锥着色器, 体积光）、`CANDLE_LIGHTS` / `CRACK_LIGHT_POS`（keywords: candle-lights, crack-glow, 蜡烛灯光, 墙缝绿光）、`UPPER_ARM` / `FOREARM` / `ELBOW_POLES`（keywords: arm-length, elbow-pole, 手臂长度, 肘部方向）、`BUTT` / `PISTOL_GRIP` / `PISTOL_GRIP_AXIS` / `BARREL_GRIP`（keywords: gun-butt, grip-point, 枪托位置, 握把位置）、`DEALER_GRIPS`（每个行刑人持枪姿势两只手握哪里）、`FORM_NODES`（每个形态显示哪些形态部件，和 `build_dealer.py` 一致；keywords: dealer-forms, form-parts, 行刑人形态, 形态部件）、`FORM_STYLE`（每个形态的名字、瞳孔颜色、血色和发光；keywords: form-style, blood-color, 形态样式, 血色）、`TORSO_NODES` / `HEAD_FORM_NODES`（跟着躯干后仰的节点、挂在头上随形态长出的节点）、`HIP_PIVOT`（躯干前后仰的支点；keywords: hip-pivot, torso-lean, 躯干支点, 后仰）；属性 `dealer_form`（当前形态）。
 - `Sfx`（class_name）— 常量 `MUSIC`（曲目表：menu = Bleak Terminal，game = Omen；keywords: background-music, track-list, 背景音乐, 曲目表）、`MUSIC_DB`（各曲播放音量）、`MUSIC_BUS`（运行时创建的 Music 总线，带一个低通滤波器）。
 - `DealerAI`（class_name）— 常量 `SELF_SHOT_MAX_P` / `SELF_SHOT_MAX_P_LAST_HP`（打自己的实弹概率上限，生命只剩 1 点时更低；keywords: self-shot-threshold, risk-control, 自残阈值, 风险控制）、`BEER_MIN_P` / `BEER_MAX_P`（最拿不准时先用啤酒退一发）。
 - `GameState`（class_name）— 新增 `inverted`（被反转器翻过的子弹下标，公开信息）。
 - `main.gd` 常量 `TURN_SECONDS`（玩家每回合思考时间 30 秒；keywords: turn-seconds, countdown, 回合时限, 倒计时）。
+- `main._transform_dealer(form)` — 行刑人这条命没了，换成下一个形态：音乐压闷，灯灭、变身，灯亮时按新形态的颜色闪一下，再加一声嘶吼 | keywords: dealer-transform, next-life, 行刑人变身, 换形态
+- `main._dealer_hit_fx(damage)` — 行刑人中弹：顿帧、闪白、色差猛地一抖；场景里喷血、后仰、触手抽搐，加上血肉闷响和这个形态的嘶叫 | keywords: dealer-hit-fx, impact-feedback, 行刑人中弹, 受击演出
+- `main._hit_stop(seconds)` — 顿帧：中弹那一下整个世界放慢到 5%，按真实时间过 seconds 秒后恢复（恢复成原来的倍率，测试里的加速不受影响） | keywords: hit-stop, impact-freeze, 顿帧, 打击停顿
+- `main._aberration_kick(strength)` — 色差猛地一抖再回到平时的 0.9 | keywords: aberration-kick, impact-distortion, 色差抖动, 冲击感
+- `BloodOverlay`（class_name，`TextureRect`）— 常量 `SIZE`（遮罩分辨率 320×180；keywords: blood-mask, mask-size, 溅血遮罩, 遮罩尺寸）、`SHADER`；方法 `splash(damage)`、`clear()`。
 - `Items`、`CrtPanel`（class_name）。
 
 ## 模块功能描述 (Module Description)
@@ -228,4 +335,9 @@ scripts · 游戏逻辑与 3D 场景
 - **行刑人 AI**：先保命（烟、药），再想办法看清当前这一发（放大镜、手机）；知道是空包弹就反转或打自己，知道是实弹就上手铐、锯枪管、打玩家。只能赌时：实弹概率在 0.3~0.7 之间且有啤酒就先退一发；概率小于 0.5 且有反转器就先反转；概率 ≥ 0.5 打玩家；只有概率 ≤ 0.34（自己只剩 1 点生命时 ≤ 0.15）才打自己，其余一律打玩家，不再掷硬币。概率由 `GameState.live_probability` 算，已经算上对手用过的反转器（公开计数按子弹被翻之前的样子记，当前这一发被翻过就取 1 - p）。
 - **道具点击范围**：`_make_pickable` 用模型网格的包围盒（四周留 1 厘米）做点击盒，不再用统一的高盒子；否则近排的高盒子在屏幕上挡住远排道具的下半截，鼠标指着远排道具却选不中。
 - **界面**：开枪选项是居中的 VBox（两个等宽大按钮并排 + 下面居中的"放下枪"），底边固定在字幕上方。右上角记录框不滚动：每来一条新记录就从最旧的删起，直到内容放得下，最新一条总是完整可见。
-- **函数清单范围**：只收录带 `@keyword` 文档的函数（`props.gd` 全部、`table_scene.gd` 和 `main.gd` 中新增或改动过的）；其余脚本的函数尚未建索引，按 R9 回退到源码搜索。
+- **行刑人的三条命**：每一局是行刑人的一条命，一条命一个形态（`TableScene.FORM_NODES` / `FORM_STYLE`）：第一局「白面」——白瓷面具（画着黑眼线、泪痕、腮红和缝着线的笑）、高礼帽、怀表链；第二局「裂面」——面具碎得只剩半张，露出咧嘴尖牙，下巴的触手须垂下来，背后长出两根大触手，额头三只小眼睁开；第三局「深渊」——头顶骨刺和两根大骨角、脸上发光的绿血管、更长的触手须、背后六根像光环一样张开的触手、西装胸口裂开一道带牙的肉缝，里面一只发光的眼睛一直盯着玩家转（`_place_dealer_parts` 每帧让 `ChestEye` 朝向镜头）。形态部件是 `dealer.glb` 里的独立节点，`set_dealer_form` 只切显示；`_grow` 记录每个部件长出来的程度（变身时从 0 补间到 1）。
+- **倒下与变身**：行刑人一条命没了（`main._announce_death` → `dealer_die`）：触手一阵抽搐，上身绕髋部 `HIP_PIVOT` 往前栽、头垂下来、瞳孔熄灭。下一局开始前 `main._transform_dealer` → `transform_to(form)`：音乐压闷、吊灯闪几下灭掉、墙缝绿光涌出来；黑暗里面具碎成片（`_shatter_mask`，碎片落在桌上一直留到这盘结束）、礼帽飞走（`_drop_hat`），新部件一边抽搐一边从 0 长出来；然后灯亮、行刑人直起身红着眼睛嘶吼，画面按新形态的颜色闪一下。最后一局赢了以后 `dealer_final_death`：背后触手、长触手须、胸口之眼枯萎缩回去，血管熄灭。新开一盘 `reset_game` 回到第一形态。
+- **上身前后仰**：头、肩膀（IK 的起点 `_shoulders`）、`Body`、背后触手、胸口之眼都按 `_lean_transform()` 绕髋部转；手留在桌上，手臂 IK 自然跟着弯。受击时 `_lean` 先往后甩再弹性回正，倒下时往前栽。
+- **行刑人受击**（`main._dealer_hit_fx` + `table_scene.dealer_hit`）：顿帧（`_hit_stop` 把 `Engine.time_scale` 临时乘 0.05，按真实时间恢复，不覆盖测试的加速倍率）、淡淡的闪白、色差猛抖；头往后一甩、上身后仰、镜头视野一缩；皮肤和触手泛红、触手着色器 `thrash` 剧烈乱甩、瞳孔一亮、两只手在桌上一抽；头上喷出血滴和血雾（`FORM_STYLE` 的血色：白面暗红、裂面黑红、深渊发光的绿色体液），椅背和他面前的桌上溅血，头上留下伤口（白面时是面具上的黑洞，`_face_z` 按 `head_base` 同一公式算位置），这些都留到这条命结束；配上血肉闷响和这个形态的嘶叫（`shriek1..3`，一个比一个低沉）。锯短枪管的 2 点伤害反应更重。
+- **玩家受击**（`main._player_hit_fx`）：顿帧、白光、色差，`table_scene.player_hit` 让镜头往上一仰、歪向一边再慢慢晃回来，`BloodOverlay.splash` 把像素血糊在屏幕四周、血痕往下淌，耳鸣；黑屏那一下只听得见心跳。生命只剩最后一点时（且上限大于 1），`post.gdshader` 的 `hurt` 让画面四周随心跳泛红、颜色变淡。
+- **函数清单范围**：只收录带 `@keyword` 文档的函数（`props.gd`、`blood_overlay.gd` 全部，`table_scene.gd`、`main.gd`、`sfx.gd` 中新增或改动过的）；其余脚本的函数尚未建索引，按 R9 回退到源码搜索。
