@@ -14,6 +14,8 @@ uniform vec3 shadow_tint = vec3(0.8, 1.0, 1.05);
 uniform float shadow_tint_amount = 0.6;
 uniform vec4 flash_color : source_color = vec4(1.0, 1.0, 1.0, 0.0);
 uniform float fade = 0.0;
+// 玩家只剩最后一点生命：画面四周随心跳一下一下泛红，颜色变淡
+uniform float hurt = 0.0;
 
 const float BAYER[16] = float[16](
 	0.0, 8.0, 2.0, 10.0,
@@ -46,6 +48,12 @@ void fragment() {
 	col *= mix(vec3(1.0), shadow_tint, shadow_tint_amount * (1.0 - smoothstep(0.0, 0.45, lum)));
 	col += (hash(px + floor(TIME * 24.0) * 17.0) - 0.5) * grain;
 	col *= clamp(1.0 - dot(from_center, from_center) * vignette * 2.0, 0.0, 1.0);
+	if (hurt > 0.0) {
+		float beat = pow(0.5 + 0.5 * sin(TIME * 7.0), 6.0) + 0.5 * pow(0.5 + 0.5 * sin(TIME * 7.0 - 1.1), 8.0);
+		float edge = smoothstep(0.08, 0.5, dot(from_center, from_center) * 2.2);
+		col = mix(col, vec3(dot(col, vec3(0.333))), 0.35 * hurt);
+		col = mix(col, vec3(0.45, 0.0, 0.02), hurt * edge * (0.35 + 0.35 * beat));
+	}
 	col *= 1.0 - scanline * mod(px.y, 2.0);
 	col = mix(col, flash_color.rgb, flash_color.a);
 	col *= 1.0 - fade;

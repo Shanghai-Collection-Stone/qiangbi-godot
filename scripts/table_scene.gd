@@ -61,6 +61,33 @@ const LIGHT_CONE_SHADER := preload("res://shaders/light_cone.gdshader")
 ## @keyword-en candle-lights, crack-glow
 const CANDLE_LIGHTS := [Vector3(2.267, 0.3, -1.5), Vector3(-1.23, -0.5, -2.2)]
 const CRACK_LIGHT_POS := Vector3(0.85, 0.4, -2.35)
+## 行刑人每条命（每一局）一个形态：每个形态显示哪些「形态部件」节点。
+## 必须和 art/blender/build_dealer.py 的 FORM_NODES 一致；不在这里的节点（身体、头、手……）所有形态都显示。
+## @keyword-cn 行刑人形态, 形态部件
+## @keyword-en dealer-forms, form-parts
+const FORM_NODES := {
+	1: ["Mask", "Hat", "WatchChain"],
+	2: ["MaskShard", "Beard", "BackTentacles2", "WatchChain"],
+	3: ["Beard", "BeardLong", "Horns", "Veins", "BackTentacles3", "ChestRift", "ChestEye"],
+}
+## 每个形态的名字、瞳孔颜色（平时 / 轮到行刑人）、受击时喷出来的东西的颜色和发光强度（第三形态是发光的绿色体液）
+## @keyword-cn 形态样式, 血色
+## @keyword-en form-style, blood-color
+const FORM_STYLE := {
+	1: {"name": "白面", "eye": Color(0.95, 0.95, 0.9), "eye_turn": Color(1.0, 0.15, 0.1),
+		"blood": Color(0.45, 0.02, 0.03), "glow": 0.0},
+	2: {"name": "裂面", "eye": Color(0.8, 1.0, 0.45), "eye_turn": Color(1.0, 0.35, 0.1),
+		"blood": Color(0.28, 0.06, 0.03), "glow": 0.0},
+	3: {"name": "深渊", "eye": Color(1.0, 0.35, 0.1), "eye_turn": Color(1.0, 0.05, 0.05),
+		"blood": Color(0.35, 1.0, 0.4), "glow": 1.2},
+}
+## 跟着躯干一起前后仰的顶层节点，和挂在头上、会随形态长出来的节点
+const TORSO_NODES := ["Body", "WatchChain", "BackTentacles2", "BackTentacles3", "ChestRift", "ChestEye"]
+const HEAD_FORM_NODES := ["Beard", "BeardLong", "Mask", "Hat", "MaskShard", "Horns", "Veins"]
+## 躯干前后仰的支点（髋部）：受击后仰、倒下前栽都绕它转，头、肩膀、背后触手、胸口之眼跟着动
+## @keyword-cn 躯干支点, 后仰
+## @keyword-en hip-pivot, torso-lean
+const HIP_PIVOT := Vector3(0, -0.35, -1.32)
 
 var sfx: Sfx
 ## 玩家能否点击道具和枪
@@ -107,8 +134,34 @@ var _table_shells: Array[Node3D] = []
 var _hover: Node3D = null
 var _time := 0.0
 var _shake := 0.0
-## 行刑人中弹时头部后仰（由补间驱动）
+## 行刑人中弹时头部后仰（由补间驱动；负数是头往前垂）
 var _head_kick := 0.0
+## 行刑人当前的形态（第几条命）
+var dealer_form := 1
+## 形态部件、躯干部件：名字 → 节点；躯干部件导入时的变换；部件长出来的程度（0..1，变身时补间）
+var _dealer_nodes := {}
+var _torso_base := {}
+var _grow := {}
+var _all_form_nodes: Array[String] = []
+## 躯干后仰角（弧度，正 = 往后仰，负 = 往前栽）；跟着躯干走的两个肩膀位置（每帧更新）
+var _lean := 0.0
+var _shoulders: Array[Vector3] = [SHOULDERS[0], SHOULDERS[1]]
+## 这条命没了：瞳孔熄灭
+var _dead := false
+## 镜头：受击时视野一缩、玩家中弹时被打得仰头和歪斜
+var _fov_kick := 0.0
+var _cam_pitch := 0.0
+var _cam_roll := 0.0
+## 吊灯整体亮度（变身时熄灭）和墙缝绿光额外的亮度（变身时涌出来）
+var _lamp_dim := 1.0
+var _crack_boost := 0.0
+## 血雾粒子；本条命留下的伤口和溅血（换命时清掉）；掉在桌上的面具碎片（一整盘游戏结束才清）
+var _blood: CPUParticles3D
+var _mist: CPUParticles3D
+var _blood_mat: StandardMaterial3D
+var _mist_mat: StandardMaterial3D
+var _wounds: Array[Node3D] = []
+var _debris: Array[Node3D] = []
 
 
 func _ready() -> void:
@@ -135,7 +188,7 @@ func _process(delta: float) -> void:
 	var flicker := 1.0
 	if fmod(_time, 7.3) < 0.3:
 		flicker = 0.35 if int(_time * 30.0) % 3 == 0 else 1.0
-	_lamp.light_energy = 4.5 * flicker * (0.97 + 0.03 * sin(_time * 13.0))
+	_lamp.light_energy = 4.5 * flicker * (0.97 + 0.03 * sin(_time * 13.0)) * _lamp_dim
 	_light_cone.set_shader_parameter("flicker", _lamp.light_energy / 4.5)
 	# 吊灯是个阻尼单摆（摆长约 1 米），平时有一点点气流晃动。
 	# 帧间隔大（卡顿、测试里加速）时拆成最长 1/60 秒的小步积分，否则会发散成 inf/NaN
@@ -148,10 +201,18 @@ func _process(delta: float) -> void:
 	_lamp_pivot.rotation = Vector3(_swing.x, 0, _swing.y)
 	for i in _candles.size():
 		_candles[i].light_energy = 0.75 + 0.12 * sin(_time * 9.0 + i * 2.1) + 0.08 * sin(_time * 23.0 + i * 5.3)
-	_crack_light.light_energy = 0.55 + 0.35 * (0.5 + 0.5 * sin(_time * 0.9))
+	_crack_light.light_energy = 0.55 + 0.35 * (0.5 + 0.5 * sin(_time * 0.9)) + _crack_boost
+	if dealer_form == 3:
+		var veins := Props.material("vein_glow")
+		veins.emission_energy_multiplier = 0.15 if _dead else 1.4 * (0.55 + 0.45 * sin(_time * 2.6))
 
-	_head.position = HEAD_POS + Vector3(sin(_time * 0.9) * 0.01, sin(_time * 1.3) * 0.008, -_head_kick * 0.12)
-	_head.rotation = Vector3(-_head_kick * 0.6 + sin(_time * 0.7) * 0.03, sin(_time * 0.4) * 0.06, sin(_time * 0.6) * 0.04)
+	var lean := _lean_transform()
+	for i in 2:
+		_shoulders[i] = lean * (SHOULDERS[i] as Vector3)
+	_head.position = lean * (HEAD_POS + Vector3(sin(_time * 0.9) * 0.01, sin(_time * 1.3) * 0.008, -_head_kick * 0.12))
+	_head.rotation = Vector3(-_lean - _head_kick * 0.6 + sin(_time * 0.7) * 0.03, sin(_time * 0.4) * 0.06,
+		sin(_time * 0.6) * 0.04)
+	_place_dealer_parts(lean)
 	for i in 2:
 		var wrist: Vector3
 		if _holding:
@@ -170,6 +231,10 @@ func _process(delta: float) -> void:
 	var sway := Vector3(sin(_time * 0.5), sin(_time * 0.73), 0) * 0.004
 	camera.position = CAMERA_POS + sway + jitter
 	camera.look_at(CAMERA_TARGET + jitter * 0.5)
+	if _cam_pitch != 0.0 or _cam_roll != 0.0:
+		camera.rotate_object_local(Vector3.RIGHT, _cam_pitch)
+		camera.rotate_object_local(Vector3.FORWARD, _cam_roll)
+	camera.fov = 68.0 - _fov_kick * 7.0
 
 
 # ---------------------------------------------------------------- 搭建场景
@@ -280,12 +345,12 @@ func _build_lamp() -> void:
 
 	var face := SpotLight3D.new()
 	face.light_color = Color(0.8, 0.95, 0.85)
-	face.light_energy = 2.2
-	face.spot_range = 1.6
-	face.spot_angle = 20.0
-	face.position = Vector3(0, 1.45, -0.5)
+	face.light_energy = 2.4
+	face.spot_range = 1.7
+	face.spot_angle = 27.0
+	face.position = Vector3(0, 1.5, -0.45)
 	add_child(face)
-	face.look_at(HEAD_POS + Vector3(0, -0.15, 0))
+	face.look_at(HEAD_POS + Vector3(0, 0.02, 0))
 	var fill := OmniLight3D.new()
 	fill.light_color = Color(0.55, 0.7, 0.75)
 	fill.light_energy = 0.35
@@ -348,6 +413,104 @@ func _build_dealer() -> void:
 	for i in 2:
 		hands[i].position = HAND_REST[i]
 	_show_fists(false)
+	for names in FORM_NODES.values():
+		for n in names:
+			if not _all_form_nodes.has(n):
+				_all_form_nodes.append(n)
+	for n in TORSO_NODES + HEAD_FORM_NODES:
+		var node := dealer.find_child(n, true, false) as Node3D
+		assert(node != null, "dealer.glb 里没有节点 %s" % n)
+		_dealer_nodes[n] = node
+	for n in TORSO_NODES:
+		_torso_base[n] = (_dealer_nodes[n] as Node3D).transform
+	_build_blood()
+	set_dealer_form(1)
+
+
+## 躯干前后仰的变换：绕髋部支点 HIP_PIVOT 转 _lean
+## @keyword-cn 躯干变换, 后仰变换
+## @keyword-en lean-transform, torso-pivot
+func _lean_transform() -> Transform3D:
+	return Transform3D(Basis(Vector3.RIGHT, -_lean), HIP_PIVOT) * Transform3D(Basis.IDENTITY, -HIP_PIVOT)
+
+
+## 跟着躯干前后仰的部件，胸口之眼一直盯着镜头；正在长出来（或缩回去）的形态部件按 _grow 缩放
+## @keyword-cn 摆放躯干部件, 部件生长
+## @keyword-en place-torso-parts, part-growth
+func _place_dealer_parts(lean: Transform3D) -> void:
+	for n in TORSO_NODES:
+		var node: Node3D = _dealer_nodes[n]
+		var t: Transform3D = lean * (_torso_base[n] as Transform3D)
+		if n == "ChestEye" and node.visible:
+			t.basis = Basis.looking_at(camera.global_position - t.origin, Vector3.UP, true)
+		node.transform = Transform3D(t.basis * Basis.from_scale(Vector3.ONE * maxf(_grow.get(n, 1.0), 0.001)), t.origin)
+	for n in HEAD_FORM_NODES:
+		(_dealer_nodes[n] as Node3D).scale = Vector3.ONE * maxf(_grow.get(n, 1.0), 0.001)
+
+
+## 行刑人中弹喷出来的血滴和一团血雾（颜色按形态在喷之前设置）
+## @keyword-cn 血雾粒子, 血滴粒子
+## @keyword-en blood-particles, blood-droplets
+func _build_blood() -> void:
+	_blood_mat = StandardMaterial3D.new()
+	_blood_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_blood_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	_blood_mat.vertex_color_use_as_albedo = true
+	_blood_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_blood = CPUParticles3D.new()
+	_blood.emitting = false
+	_blood.one_shot = true
+	_blood.amount = 48
+	_blood.lifetime = 0.9
+	_blood.explosiveness = 0.95
+	_blood.local_coords = false
+	_blood.direction = Vector3(0, 0.35, -1)
+	_blood.spread = 65.0
+	_blood.initial_velocity_min = 0.7
+	_blood.initial_velocity_max = 2.2
+	_blood.gravity = Vector3(0, -3.5, 0)
+	_blood.damping_min = 0.4
+	_blood.damping_max = 1.2
+	_blood.scale_amount_min = 0.5
+	_blood.scale_amount_max = 1.4
+	var drop := QuadMesh.new()
+	drop.size = Vector2(0.032, 0.032)
+	drop.material = _blood_mat
+	_blood.mesh = drop
+	var fade := Gradient.new()
+	fade.set_color(0, Color(1, 1, 1, 1))
+	fade.set_color(1, Color(0.7, 0.7, 0.7, 0))
+	_blood.color_ramp = fade
+	add_child(_blood)
+
+	_mist_mat = _blood_mat.duplicate() as StandardMaterial3D
+	_mist_mat.albedo_texture = Props.pixel_texture("smoke")
+	_mist_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_mist = CPUParticles3D.new()
+	_mist.emitting = false
+	_mist.one_shot = true
+	_mist.amount = 10
+	_mist.lifetime = 0.8
+	_mist.explosiveness = 1.0
+	_mist.local_coords = false
+	_mist.direction = Vector3(0, 0.2, -1)
+	_mist.spread = 80.0
+	_mist.initial_velocity_min = 0.15
+	_mist.initial_velocity_max = 0.6
+	_mist.gravity = Vector3(0, -0.3, 0)
+	var grow := Curve.new()
+	grow.add_point(Vector2(0, 0.5))
+	grow.add_point(Vector2(1, 1.8))
+	_mist.scale_amount_curve = grow
+	var puff := QuadMesh.new()
+	puff.size = Vector2(0.14, 0.14)
+	puff.material = _mist_mat
+	_mist.mesh = puff
+	var mist_fade := Gradient.new()
+	mist_fade.set_color(0, Color(1, 1, 1, 0.7))
+	mist_fade.set_color(1, Color(1, 1, 1, 0))
+	_mist.color_ramp = mist_fade
+	add_child(_mist)
 
 
 func _build_gun() -> void:
@@ -457,7 +620,7 @@ static func slot_position(side: int, slot: int) -> Vector3:
 ## @keyword-cn 手臂IK, 肘部求解
 ## @keyword-en arm-ik, elbow-solve
 func _solve_arm(i: int, wrist: Vector3) -> void:
-	var shoulder: Vector3 = SHOULDERS[i]
+	var shoulder := _shoulders[i]
 	var to := wrist - shoulder
 	var d := to.length()
 	var dir := to / d
@@ -498,7 +661,7 @@ func _grip_transform(i: int, where: String) -> Transform3D:
 		_:
 			center = gun.transform * BARREL_GRIP
 	var x := axis.normalized()
-	var to_shoulder: Vector3 = SHOULDERS[i] - center
+	var to_shoulder := _shoulders[i] - center
 	var y := -(to_shoulder - x * x.dot(to_shoulder)).normalized()
 	return Transform3D(Basis(x, y, x.cross(y)), center)
 
@@ -581,6 +744,10 @@ func _clear_hover(target: Node3D) -> void:
 # ---------------------------------------------------------------- 道具
 
 func reset_round() -> void:
+	for w in _wounds:
+		if is_instance_valid(w):
+			w.queue_free()
+	_wounds.clear()
 	for side in 2:
 		for model in items[side]:
 			model.queue_free()
@@ -909,21 +1076,297 @@ func flash_gun(color: Color) -> void:
 # ---------------------------------------------------------------- 行刑人
 
 func set_dealer_active(on: bool) -> void:
-	var c := Color(1, 0.15, 0.1) if on else Color(0.95, 0.95, 0.9)
+	var style: Dictionary = FORM_STYLE[dealer_form]
+	var c: Color = Color.BLACK if _dead else (style["eye_turn"] if on else style["eye"])
 	_pupil.albedo_color = c
 	_pupil.emission = c
 
 
-func dealer_hit() -> void:
-	_shake = 0.03
-	var tw := create_tween()
-	tw.tween_property(self, "_head_kick", 1.0, 0.06)
-	tw.tween_property(self, "_head_kick", 0.0, 0.9).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+## 切换到某个形态：只显示这个形态的部件（立刻切换，不演出；演出见 transform_to）
+## @keyword-cn 切换形态, 显示部件
+## @keyword-en set-form, show-parts
+func set_dealer_form(form: int) -> void:
+	dealer_form = form
+	for n in _all_form_nodes:
+		(_dealer_nodes[n] as Node3D).visible = n in FORM_NODES[form]
+		_grow[n] = 1.0
+	_dead = false
+	set_dealer_active(false)
+
+
+## 新开一盘：回到第一形态，扶正身体、点亮灯，清掉桌上的碎片
+## @keyword-cn 新开一盘, 重置行刑人
+## @keyword-en reset-game, reset-dealer
+func reset_game() -> void:
+	for d in _debris:
+		if is_instance_valid(d):
+			d.queue_free()
+	_debris.clear()
+	_lean = 0.0
+	_head_kick = 0.0
+	_lamp_dim = 1.0
+	_crack_boost = 0.0
+	set_dealer_form(1)
+
+
+## 行刑人中弹：头往后一甩、整个上身后仰再弹回来、皮肤和触手泛红、触手剧烈抽搐、瞳孔一亮、
+## 手在桌上一抽、镜头一缩，头上喷出血滴和血雾（第三形态是发光的绿色体液），椅背上溅一片，头上留下伤口
+## @keyword-cn 行刑人受击, 受击反应
+## @keyword-en dealer-hit, hit-reaction
+func dealer_hit(damage: int) -> void:
+	var heavy := damage > 1
+	_shake = 0.055 if heavy else 0.035
+	_fov_kick = 1.0 if heavy else 0.7
+	create_tween().tween_property(self, "_fov_kick", 0.0, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	var kick := create_tween()
+	kick.tween_property(self, "_head_kick", 1.3 if heavy else 1.0, 0.05)
+	kick.tween_property(self, "_head_kick", 0.0, 1.1).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	var lean := create_tween()
+	lean.tween_property(self, "_lean", 0.3 if heavy else 0.2, 0.07)
+	lean.tween_property(self, "_lean", 0.0, 1.0).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 	_skin.albedo_color = Color(1, 0.3, 0.25)
 	create_tween().tween_property(_skin, "albedo_color", Color.WHITE, 1.0)
 	_tentacle.set_shader_parameter("tint", Color(1, 0.3, 0.25))
 	create_tween().tween_method(func(c: Color) -> void: _tentacle.set_shader_parameter("tint", c),
 		Color(1, 0.3, 0.25), Color.WHITE, 1.0)
+	create_tween().tween_method(_set_thrash, 1.0, 0.0, 1.6)
+	_pupil.emission_energy_multiplier = 7.0
+	create_tween().tween_property(_pupil, "emission_energy_multiplier", 2.0, 0.6)
+	if not _holding:
+		for i in 2:
+			var rest := hands[i].position
+			var spasm := create_tween()
+			spasm.tween_property(hands[i], "position", rest + Vector3(0, 0.06, 0.02), 0.06)
+			spasm.tween_property(hands[i], "position", rest, 0.3).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	_spray_blood(_head.global_transform * Vector3(0, 0.02, 0.1), heavy)
+	_splat_behind(heavy)
+	_add_wound()
+	if heavy:
+		_add_wound()
+
+
+func _set_thrash(v: float) -> void:
+	_tentacle.set_shader_parameter("thrash", v)
+
+
+## 头上喷出血滴和血雾：颜色按形态，第三形态的体液发光（不受光照、亮度超过 1 会带柔光）
+## @keyword-cn 喷血, 体液颜色
+## @keyword-en spray-blood, ichor-color
+func _spray_blood(at: Vector3, heavy: bool) -> void:
+	var style: Dictionary = FORM_STYLE[dealer_form]
+	var c: Color = style["blood"]
+	var bright := 1.0 + float(style["glow"])
+	_blood_mat.albedo_color = Color(c.r * bright, c.g * bright, c.b * bright)
+	_mist_mat.albedo_color = Color(c.r * bright, c.g * bright, c.b * bright, 0.8)
+	_blood.amount = 90 if heavy else 60
+	_blood.global_position = at
+	_blood.restart()
+	_mist.global_position = at
+	_mist.restart()
+
+
+## 椅背上、行刑人身后溅一片血（留到这条命结束）
+## @keyword-cn 椅背溅血, 血迹
+## @keyword-en splat-behind, blood-decal
+func _splat_behind(heavy: bool) -> void:
+	var style: Dictionary = FORM_STYLE[dealer_form]
+	for _k in (3 if heavy else 2):
+		var quad := QuadMesh.new()
+		quad.size = Vector2.ONE * randf_range(0.14, 0.28)
+		var m := Props.mat(style["blood"], 0.35, 0.0, Props.blood_splat_texture())
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		if float(style["glow"]) > 0.0:
+			m.emission_enabled = true
+			m.emission = style["blood"]
+			m.emission_energy_multiplier = 0.8
+		var pos := Vector3(_head.position.x + randf_range(-0.28, 0.28),
+			clampf(_head.position.y + randf_range(-0.22, 0.2), 0.0, 1.0), -1.592 + randf() * 0.004)
+		_wounds.append(Props.part(self, quad, m, pos, Vector3(0, 0, randf() * TAU)))
+		# 滴到行刑人面前的桌上：在吊灯光底下，比椅背上的显眼
+		var drip := Props.part(self, quad, m, Vector3(randf_range(-0.32, 0.32), 0.002 + randf() * 0.002,
+			randf_range(-0.82, -0.6)), Vector3(-PI / 2.0, randf() * TAU, 0))
+		drip.scale = Vector3.ONE * 0.7
+		_wounds.append(drip)
+
+
+## 头上留一个伤口：第一形态打在面具上（瓷面上一个黑洞），之后打在皮肉上（暗色的血窟窿）。
+## 位置挑额头、颧骨、太阳穴这些地方，避开眼窝和嘴
+## @keyword-cn 伤口, 受伤痕迹
+## @keyword-en head-wound, damage-mark
+func _add_wound() -> void:
+	var spots := [Vector2(-0.03, 0.11), Vector2(0.04, 0.1), Vector2(0.0, 0.125), Vector2(-0.085, -0.02),
+		Vector2(0.09, -0.01), Vector2(-0.1, 0.06), Vector2(0.1, 0.065), Vector2(0.03, 0.075)]
+	var spot: Vector2 = spots[randi() % spots.size()] + Vector2(randf_range(-0.01, 0.01), randf_range(-0.01, 0.01))
+	var z := _face_z(spot.x, spot.y) + (0.024 if dealer_form == 1 else 0.008)
+	var x := spot.x
+	var y := spot.y
+	var blob := SphereMesh.new()
+	blob.radius = 0.02
+	blob.height = 0.04
+	blob.radial_segments = 8
+	blob.rings = 4
+	var c: Color = Color(0.03, 0.02, 0.02) if dealer_form == 1 else (FORM_STYLE[dealer_form]["blood"] as Color).darkened(0.35)
+	var wound := Props.part(_head, blob, Props.mat(c, 0.25), Vector3(x, y, z), Vector3.ZERO,
+		Vector3(1.0, 1.0, 0.5) * randf_range(0.8, 1.2))
+	_wounds.append(wound)
+
+
+## 头部基本形正面 (x, y) 处的 z（头部局部坐标）：和 art/blender/build_dealer.py 的 head_base 是同一个公式
+## @keyword-cn 脸面深度, 头部基本形
+## @keyword-en face-depth, head-base-shape
+static func _face_z(x: float, y: float) -> float:
+	var uy := clampf(y / 0.21, -1.0, 1.0)
+	var narrow := 1.0 - 0.45 * pow(-uy, 1.6) if uy < 0.0 else 1.0
+	var ux := clampf(x / (0.145 * narrow), -1.0, 1.0)
+	var uz := sqrt(maxf(0.0, 1.0 - ux * ux - uy * uy))
+	var z := uz * 0.15
+	if uy < 0.0:
+		z *= 1.0 - 0.2 * uy * uy
+	else:
+		z -= 0.045 * uy * uy * (1.0 - 0.6 * uz)
+	return z * (1.0 - 0.07 * smoothstep(0.05, 0.55, uz))
+
+
+## 玩家中弹：镜头被打得往上一仰、歪向一边，然后晕乎乎地慢慢晃回来
+## @keyword-cn 玩家受击镜头, 镜头歪斜
+## @keyword-en player-hit-camera, camera-knock
+func player_hit(damage: int) -> void:
+	_shake = 0.06 + 0.02 * damage
+	_cam_pitch = 0.3
+	_cam_roll = randf_range(0.2, 0.3) * (1.0 if randf() < 0.5 else -1.0)
+	var tw := create_tween().set_parallel()
+	tw.tween_property(self, "_cam_pitch", 0.0, 1.8).set_delay(0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	var roll := create_tween()
+	roll.tween_interval(0.5)
+	roll.tween_property(self, "_cam_roll", -_cam_roll * 0.25, 1.0).set_trans(Tween.TRANS_SINE)
+	roll.tween_property(self, "_cam_roll", 0.0, 1.0).set_trans(Tween.TRANS_SINE)
+
+
+## 这条命没了：触手一阵抽搐，上身往前栽、头垂下来、瞳孔熄灭
+## @keyword-cn 行刑人倒下, 一条命结束
+## @keyword-en dealer-die, life-lost
+func dealer_die() -> void:
+	_dead = true
+	set_dealer_active(false)
+	create_tween().tween_method(_set_thrash, 0.8, 0.0, 1.2)
+	var tw := create_tween().set_parallel().set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(self, "_lean", -0.3, 0.8)
+	tw.tween_property(self, "_head_kick", -0.9, 0.9)
+	sfx.play("thud", -2.0)
+	await tw.finished
+
+
+## 换成下一个形态（下一条命）：吊灯闪几下灭掉，墙缝里的绿光涌出来；黑暗里旧形态的面具碎成片掉在桌上、
+## 礼帽飞走，新的部件一边抽搐一边长出来；然后灯重新亮起，行刑人直起身、红着眼睛一声嘶吼
+## @keyword-cn 变身演出, 下一形态
+## @keyword-en transform-sequence, next-form
+func transform_to(form: int) -> void:
+	var old := dealer_form
+	sfx.play("rumble")
+	await _flicker_lamp([0.25, 1.0, 0.1, 0.6, 0.02], 0.09)
+	_shake = 0.03
+	create_tween().tween_property(self, "_crack_boost", 3.5, 0.6)
+	if old == 1:
+		_drop_hat()
+		_shatter_mask("Mask", 14)
+	elif old == 2:
+		_shatter_mask("MaskShard", 8)
+	sfx.play("shatter")
+	dealer_form = form
+	var grow := create_tween().set_parallel()
+	for n in _all_form_nodes:
+		var node: Node3D = _dealer_nodes[n]
+		var on: bool = n in FORM_NODES[form]
+		if on and not node.visible:
+			node.visible = true
+			_grow[n] = 0.001
+			grow.tween_method(_set_grow.bind(n), 0.001, 1.0, 1.6).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+		elif not on:
+			node.visible = false
+	create_tween().tween_method(_set_thrash, 1.0, 0.0, 2.2)
+	sfx.play("squelch")
+	await get_tree().create_timer(1.0).timeout
+	sfx.play("roar")
+	_dead = false
+	set_dealer_active(true)
+	_pupil.emission_energy_multiplier = 8.0
+	create_tween().tween_property(_pupil, "emission_energy_multiplier", 2.0, 1.2)
+	var rise := create_tween().set_parallel().set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	rise.tween_property(self, "_lean", 0.0, 1.0)
+	rise.tween_property(self, "_head_kick", 0.0, 1.0)
+	create_tween().tween_property(self, "_crack_boost", 0.0, 1.5)
+	await _flicker_lamp([0.4, 0.05, 0.8, 0.3, 1.0], 0.08)
+	_shake = 0.05
+	await get_tree().create_timer(0.8).timeout
+	set_dealer_active(false)
+
+
+## 最后一条命也没了：倒下以后背后的触手、长触手须和胸口之眼枯萎缩回去，发光的血管熄灭，上身再往下栽
+## @keyword-cn 最终死亡, 触手枯萎
+## @keyword-en final-death, wither
+func dealer_final_death() -> void:
+	sfx.play("rumble", -4.0)
+	var tw := create_tween().set_parallel().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	for n in FORM_NODES[dealer_form]:
+		if n in ["BackTentacles2", "BackTentacles3", "BeardLong", "ChestEye"]:
+			tw.tween_method(_set_grow.bind(n), 1.0, 0.001, 1.6)
+	tw.tween_property(self, "_lean", -0.45, 1.6)
+	await tw.finished
+
+
+func _set_grow(v: float, n: String) -> void:
+	_grow[n] = v
+
+
+## 吊灯按 levels 依次跳到这些亮度，每一下停 step 秒（灯泡接触不良那种闪）
+## @keyword-cn 吊灯闪烁, 灯光明灭
+## @keyword-en lamp-flicker, light-stutter
+func _flicker_lamp(levels: Array, step: float) -> void:
+	for v in levels:
+		_lamp_dim = v
+		await get_tree().create_timer(step).timeout
+
+
+## 礼帽从头上飞走，翻着跟头落到椅子后面
+## @keyword-cn 礼帽飞走, 掉帽子
+## @keyword-en hat-flies-off, drop-hat
+func _drop_hat() -> void:
+	var hat: Node3D = _dealer_nodes["Hat"]
+	var copy := hat.duplicate() as Node3D
+	add_child(copy)
+	copy.global_transform = hat.global_transform
+	var tw := create_tween().set_parallel()
+	tw.tween_property(copy, "position", copy.position + Vector3(0.35, 0.25, -0.7), 0.7).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(copy, "rotation", copy.rotation + Vector3(-2.6, 0.8, 0.4), 0.7)
+	tw.chain().tween_callback(copy.queue_free)
+
+
+## 面具碎成 count 片：从脸上迸开，翻滚着落到行刑人面前的桌上，一直留到这盘游戏结束
+## @keyword-cn 面具碎片, 碎裂
+## @keyword-en mask-shards, shatter
+func _shatter_mask(node_name: String, count: int) -> void:
+	var mask: Node3D = _dealer_nodes[node_name]
+	for _k in count:
+		var piece := PrismMesh.new()
+		piece.size = Vector3(randf_range(0.025, 0.05), randf_range(0.025, 0.05), 0.005)
+		piece.left_to_right = randf()
+		var local := Vector3(randf_range(-0.1, 0.1), randf_range(-0.12, 0.12), 0.16)
+		if node_name == "MaskShard":
+			local.x = randf_range(-0.11, 0.0)
+		var start := mask.global_transform * local
+		var end := Vector3(randf_range(-0.55, 0.55), 0.004, randf_range(-0.95, -0.55))
+		var shard := Props.part(self, piece, Props.material("porcelain"), start)
+		var spin := Vector3(randf_range(6, 12), randf_range(6, 12), randf_range(6, 12))
+		var rest := Vector3(-PI / 2.0, randf() * TAU, 0)
+		var tw := create_tween()
+		tw.tween_method(_shard_arc.bind(shard, start, end, spin, rest), 0.0, 1.0, randf_range(0.5, 0.8))
+		_debris.append(shard)
+
+
+func _shard_arc(t: float, shard: Node3D, start: Vector3, end: Vector3, spin: Vector3, rest: Vector3) -> void:
+	shard.position = start.lerp(end, t) + Vector3(0, sin(t * PI) * 0.25, 0)
+	shard.rotation = rest if t >= 1.0 else spin * t
 
 
 func shake(amount: float) -> void:

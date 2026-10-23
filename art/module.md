@@ -15,7 +15,7 @@ art · 美术资源与生产管线
 - `blender/build_shotgun.py` — 泵动霰弹枪（Body / BarrelFront / Sight / Pump）→ `models/shotgun.glb`。
 - `blender/build_shell.py` — 12 号霰弹（Shell）→ `models/shell.glb`。
 - `blender/build_items.py` — 8 件道具，每件一个 glb → `models/items/<id>.glb`。
-- `blender/build_dealer.py` — 行刑人（Chair / Body / Head+瞳孔 / HandL/R / GripL/R / UpperArmL/R / ForearmL/R / ElbowL/R）→ `models/dealer.glb`。
+- `blender/build_dealer.py` — 行刑人（Chair / Body / Head+瞳孔 / HandL/R / GripL/R / UpperArmL/R / ForearmL/R / ElbowL/R），加上三个形态的部件（Head 下的 Mask / Hat / MaskShard / Beard / BeardLong / Horns / Veins，顶层的 WatchChain / BackTentacles2 / BackTentacles3 / ChestRift / ChestEye）→ `models/dealer.glb`。
 - `blender/build_room.py` — 赌桌、吊灯、房间 → `models/table.glb`、`models/lamp.glb`、`models/room.glb`。
 - `models/` — 导出的 glb（生成物，勿手改）。
 - `textures/` — 加工后的像素贴图（生成物，勿手改）。
@@ -46,7 +46,7 @@ art · 美术资源与生产管线
 - `kit.box_uv(obj, size, offset)` — 世界空间盒式投影 UV：1 个 UV 单位 = size 米，按面法线主轴选投影平面，平铺贴图密度一致 | keywords: box-uv, triplanar-projection, 盒式UV, 投影展开
 - `kit.smooth(obj, angle)` — 按角度平滑着色：小于 angle 度的边平滑，硬边保留 | keywords: smooth-shading, auto-smooth, 平滑着色, 自动光滑
 - `kit.triangle_count(objs)` — 统计物体（含修改器结果）的三角形总数，用来控制面数预算 | keywords: triangle-count, poly-budget, 三角面数, 面数预算
-- `kit.export_glb(objs, rel_path, vertex_color)` — 把 objs（连同它们的子物体）导出为 art/models/<rel_path>.glb，Y 轴朝上，应用修改器，不嵌贴图 | keywords: export-glb, gltf-export, 导出模型, 导出glb
+- `kit.export_glb(objs, rel_path, vertex_color)` — 把 objs（连同它们的子物体）导出为 art/models/<rel_path>.glb，Y 轴朝上，应用修改器，不嵌贴图；导出前把每个网格的活动颜色属性设成默认渲染颜色 | keywords: export-glb, gltf-export, 导出模型, 导出glb
 - `kit.render_preview(rel_path, direction, target, distance, fov, resolution, objs)` — 渲染一张预览图到 art/source/previews/<rel_path>：相机从 Godot 方向 direction 看向物体中心 | keywords: render-preview, eevee-render, 渲染预览, 预览图
 - `process_textures.load_rgba(path)` — 读 PNG 为 (高, 宽, 4) 的 float 数组（Blender 的行序：从下往上，读写一致即可） | keywords: load-image, read-pixels, 读取图片, 读像素
 - `process_textures.save_rgba(arr, path, alpha)` — 把 (高, 宽, 4) float 数组写成 PNG（alpha=False 时存 RGB） | keywords: save-image, write-png, 保存图片, 写PNG
@@ -121,7 +121,7 @@ art · 美术资源与生产管线
 - `build_dealer.build_body(mats)` — 构建瘦长西装躯干：圆角截面放样的身体，贴着胸口投影的马甲、衬衫、领带、翻领和纽扣，加脖子和领圈 | keywords: dealer-body, three-piece-suit, 行刑人躯干, 三件套西装
 - `build_dealer.build_head(mats)` — 构建行刑人的头：密细分球按 head_shape 位移雕刻成一个整体，眼窝/口腔/缝线的明暗按 head_color 烘焙进顶点色， | keywords: dealer-head, grinning-skull, 行刑人头部, 咧嘴骷髅
 - `build_dealer.build_head.surface(x, y)` — 头部表面在 (x, y) 处的点和法线（头部局部坐标），打不中时退回一个默认值 | keywords: head-surface, raycast-fallback, 头部表面, 射线取点
-- `build_dealer.build_beard(mats, surface)` — 下颌和下巴上长出的触手须（11 根）：外圈 6 根沿下颌两侧、内圈 5 根在下巴，垂到胸口，尖端向外卷起 | keywords: tentacle-beard, cthulhu-jaw, 触手须, 克苏鲁下颌
+- `build_dealer.build_beard(mats, surface, long)` — 下颌和下巴上长出的触手须（11 根）：外圈 6 根沿下颌两侧、内圈 5 根在下巴，垂到胸口，尖端向外卷起 | keywords: tentacle-beard, cthulhu-jaw, 触手须, 克苏鲁下颌
 - `build_dealer.build_hand(name, center, side, mats)` — 构建一只平放、长指、关节突出的骨感手掌 | keywords: skeletal-hand, articulated-fingers, 骨感手掌, 分节手指
 - `build_dealer.build_arm_segment(name, profile, mats, cuff)` — 手臂的一段（上臂或前臂）：沿本地 Y 轴长 1 米、原点居中的袖管，-y 端是近端（肩或肘） | keywords: arm-segment, unit-sleeve, 手臂分段, 单位袖管
 - `build_dealer.build_elbow(name, mats)` — 肘关节：一个袖子布料的球，游戏每帧放到肘部，盖住上臂和前臂的接缝 | keywords: elbow-joint, sleeve-ball, 肘关节, 关节球
@@ -130,9 +130,35 @@ art · 美术资源与生产管线
 - `build_dealer.solve_elbow(shoulder, wrist, pole)` — 两段手臂的解析 IK（和 table_scene.gd 的 _solve_arm 同一算法）：返回肘部位置，够不着时沿直线拉长 | keywords: two-bone-ik, elbow-solve, 两段IK, 肘部求解
 - `build_dealer.place_segment(obj, start, end)` — 仅为预览把单位长的手臂段摆到两点之间（Godot 坐标） | keywords: preview-segment, place-between, 预览手臂段, 两点摆放
 - `build_dealer.reset_transform(obj)` — 把物体恢复到导出所需的原点、零旋转、单位缩放 | keywords: reset-transform, export-ready, 重置变换, 导出就绪
-- `build_dealer.render_previews(objects)` — 渲染玩家视角（手放桌上，手臂按 IK 弯肘）、头部正侧面和握拳手的检查图 | keywords: dealer-previews, visual-inspection, 行刑人预览, 视觉检查
+- `build_dealer.render_previews(objects)` — 渲染三个形态各一张玩家视角（手放桌上，手臂按 IK 弯肘）和头部 3/4 特写 | keywords: dealer-previews, visual-inspection, 行刑人预览, 视觉检查
 - `build_dealer.print_statistics(objects)` — 打印各逻辑节点与头部组合的三角面数统计 | keywords: dealer-statistics, triangle-budget, 行刑人统计, 三角面预算
 - `build_dealer.main()` — 重置场景、构建全部节点、导出 GLB 并生成预览 | keywords: build-dealer, export-dealer, 构建行刑人, 导出行刑人
+- `build_dealer.head_normal(x, y, z)` — 基本形在头部局部点 (x, y, z) 处的近似法线（按椭球 0.145 × 0.21 × 0.15 求梯度） | keywords: head-normal, ellipsoid-gradient, 头部法线, 椭球梯度
+- `build_dealer.head_point(ux, uy, uz, offset)` — 单位方向 (ux, uy, uz) 上的基本形表面点（头部局部坐标），沿近似法线外推 offset。面具壳用它，表面光滑不带五官 | keywords: head-offset-point, mask-surface, 头部外推点, 面具曲面
+- `build_dealer.head_half_width(y)` — 基本形在高度 y（头部局部）处的半宽：正面射线在 |x| 小于它时才打得中头 | keywords: head-silhouette, half-width, 头部轮廓, 半宽
+- `build_dealer.base_front(x, y)` — 不带五官的光滑基本形在正面 (x, y) 处的点和法线（头部局部 Godot 坐标），打不中返回 None | keywords: smooth-base-surface, mask-projection, 光滑基本形, 面具投影
+- `build_dealer.sculpt_point(direction, offset)` — 单位方向上雕刻后的头部表面点和近似法线（头部局部坐标），点沿法线外推 offset（负数是往里埋） | keywords: sculpt-point, horn-root, 雕刻表面点, 骨角根部
+- `build_dealer.build_suit_details(mats, bvh)` — 西装上的小细节：垫肩、左胸口袋和露出的口袋巾、左翻领上的红色胸花 | keywords: suit-details, pocket-square, 西装细节, 口袋巾
+- `build_dealer.build_watch_chain(mats, bvh)` — 马甲上的黄铜怀表链：从第二颗纽扣垂成一道弧挂进表袋，袋口露出半块怀表 | keywords: watch-chain, pocket-watch, 怀表链, 怀表
+- `build_dealer.build_head_form_parts(mats, surface)` — 头上随形态出现的部件，都挂成 Head 的子节点（跟着头一起动） | keywords: form-head-parts, per-form-parts, 形态头部部件, 分形态部件
+- `build_dealer.mask_half(y)` — 面具在高度 y 处的半宽：额头是一段椭圆弧，两腮宽，往下巴收尖；不超出头的轮廓 | keywords: mask-half-width, shield-outline, 面具半宽, 盾形轮廓
+- `build_dealer.mask_keep(x, y)` — 白瓷面具的轮廓（头部局部 x, y）：盾形里挖掉两个眼洞 | keywords: mask-outline, eye-holes, 面具轮廓, 眼洞
+- `build_dealer.mask_contours(x, y)` — 面具边界上离 (x, y) 最近的候选点：两侧轮廓、额头椭圆弧、下巴平边、两个眼洞椭圆 | keywords: contour-candidates, edge-snap, 轮廓候选点, 边缘吸附
+- `build_dealer._polyline_distance(x, y, points)` — 点到折线的最近距离 | keywords: polyline-distance, point-to-path, 折线距离, 点到路径
+- `build_dealer.mask_paint(x, y)` — 面具上画的东西（顶点色，乘在白瓷上）：眼洞一圈黑眼线、眼下两道黑泪痕、腮红 | keywords: mask-paint, painted-smile, 面具彩绘, 画上的笑
+- `build_dealer.mask_shell(name, keep, contours, mat, offset, thickness, step)` — 面具壳：在头部正面 (x, y) 平面上铺一张 step 米的网格，keep(x, y) 为真的格子留下 | keywords: mask-shell, contour-snap, 面具壳, 轮廓吸附
+- `build_dealer.build_mask(mats)` — 形态一：整张白瓷面具，盖住咧嘴和额头的三只眼，只从两个眼洞里透出发光的瞳孔 | keywords: porcelain-mask, form-one, 白瓷面具, 形态一
+- `build_dealer.crack_x(y)` — 碎面具的裂口：沿 y 往下的锯齿折线，返回裂口在 y 处的 x（留下 x 更小的那半边） | keywords: crack-edge, jagged-line, 裂口, 锯齿线
+- `build_dealer.build_mask_shard(mats)` — 形态二：面具碎掉大半，只剩右脸（画面左边）一块，沿裂纹的锯齿边，歪斜地挂在脸上，露出底下的笑 | keywords: mask-shard, form-two, 碎面具, 形态二
+- `build_dealer.build_hat(mats)` — 形态一：黑色高礼帽，暗红缎带，帽檐两边微微上卷，往后歪一点戴在长颅上 | keywords: top-hat, gentleman, 高礼帽, 绅士
+- `build_dealer.build_horns(mats)` — 形态三：沿头顶骨冠长出一排向后弯的骨刺，两边太阳穴各一根往上往后卷的大骨角 | keywords: bone-horns, form-three, 骨角, 形态三
+- `build_dealer.build_veins(mats, surface)` — 形态三：脸上鼓起的发光绿血管，从脸中间往外随机蜿蜒，绕开眼窝和嘴 | keywords: glowing-veins, face-veins, 发光血管, 脸部血管
+- `build_dealer.tentacle_path(root, angle, length, rnd, reach)` — 一根从背后长出的大触手的控制点：沿 angle（与竖直方向的夹角）伸出 length， | keywords: tentacle-path, s-curve, 触手路径, S形曲线
+- `build_dealer.build_back_tentacles(mats, form)` — 从背后、肩膀后面长出来的大触手，越过肩头朝玩家这边卷过来：形态二 2 根，形态三 6 根像光环一样张开 | keywords: back-tentacles, tentacle-halo, 背后触手, 触手光环
+- `build_dealer.flesh_ring(name, center, rx, ry, tube, mat, seed, segments, sides)` — 一圈粗细不匀的肉唇：沿椭圆 (rx, ry)（Godot x-y 平面，朝 +z）扫一根管子，管径随机起伏 | keywords: flesh-ring, wound-lips, 肉唇, 伤口边缘
+- `build_dealer.ellipse_disc(name, center, rx, ry, mat, segments)` — 朝 +z 的实心椭圆片（伤口里黑洞洞的底） | keywords: ellipse-disc, wound-backing, 椭圆片, 伤口底
+- `build_dealer.build_chest(mats)` — 形态三：西装胸口裂开一道竖着的肉缝，一圈肉唇和朝里的尖牙，里面一只发光的大眼（ChestEye，游戏里会盯着玩家转） | keywords: chest-eye, chest-rift, 胸口之眼, 胸口裂缝
+- `build_dealer.show_form(form)` — 预览用：只让某个形态的部件参与渲染（不在 FORM_NODES 里的节点不受影响） | keywords: preview-form, form-visibility, 预览形态, 形态显示
 - `build_room.create_materials()` — 创建本脚本使用的全部命名材质 | keywords: room-materials, named-materials, 房间材质, 命名材质
 - `build_room.add_torus(name, major_radius, minor_radius, center, axis, mat, major_segments, minor_segments)` — 创建沿指定 Godot 轴向的低模圆环 | keywords: torus-primitive, ring-mesh, 圆环图元, 环形网格
 - `build_room.add_beam(parts, name, start, end, radius, mat, segments)` — 在两个 Godot 坐标点之间添加圆柱梁并收集到部件列表 | keywords: point-beam, cylinder-link, 点间圆梁, 圆柱连接
@@ -401,13 +427,65 @@ art · 美术资源与生产管线
 | 场景检查 | scene-review |
 | 构建入口 | build-entry |
 | 导出资产 | export-assets |
+| 头部法线 | head-normal |
+| 椭球梯度 | ellipsoid-gradient |
+| 头部外推点 | head-offset-point |
+| 面具曲面 | mask-surface |
+| 头部轮廓 | head-silhouette |
+| 半宽 | half-width |
+| 光滑基本形 | smooth-base-surface |
+| 面具投影 | mask-projection |
+| 雕刻表面点 | sculpt-point |
+| 骨角根部 | horn-root |
+| 西装细节 | suit-details |
+| 口袋巾 | pocket-square |
+| 怀表链 | watch-chain |
+| 怀表 | pocket-watch |
+| 形态头部部件 | form-head-parts |
+| 分形态部件 | per-form-parts |
+| 面具半宽 | mask-half-width |
+| 盾形轮廓 | shield-outline |
+| 面具轮廓 | mask-outline |
+| 眼洞 | eye-holes |
+| 轮廓候选点 | contour-candidates |
+| 边缘吸附 | edge-snap |
+| 折线距离 | polyline-distance |
+| 点到路径 | point-to-path |
+| 面具彩绘 | mask-paint |
+| 画上的笑 | painted-smile |
+| 面具壳 | mask-shell |
+| 轮廓吸附 | contour-snap |
+| 白瓷面具 | porcelain-mask |
+| 形态一 | form-one |
+| 裂口 | crack-edge |
+| 锯齿线 | jagged-line |
+| 碎面具 | mask-shard |
+| 形态二 | form-two |
+| 高礼帽 | top-hat |
+| 绅士 | gentleman |
+| 骨角 | bone-horns |
+| 形态三 | form-three |
+| 发光血管 | glowing-veins |
+| 脸部血管 | face-veins |
+| 触手路径 | tentacle-path |
+| S形曲线 | s-curve |
+| 背后触手 | back-tentacles |
+| 触手光环 | tentacle-halo |
+| 肉唇 | flesh-ring |
+| 伤口边缘 | wound-lips |
+| 椭圆片 | ellipse-disc |
+| 伤口底 | wound-backing |
+| 胸口之眼 | chest-eye |
+| 胸口裂缝 | chest-rift |
+| 预览形态 | preview-form |
+| 形态显示 | form-visibility |
 
 ## 模块功能描述 (Module Description)
 
 **重新生成**（工作目录为仓库根，Blender 4.5 LTS）：
 
 - 贴图：`blender -b --factory-startup --python art/blender/process_textures.py`（读 `art/source/textures|labels/*.png`，写 `art/textures/*.png`；裁切尺寸、平铺模式、亮度/饱和度在脚本顶部 `SPECS` 表里）。
-- 模型：`blender -b --factory-startup --python art/blender/build_<名字>.py`，每个脚本同时把检查图渲染到 `art/source/previews/<分组>/`。
+- 模型：`blender -b --factory-startup --python art/blender/build_<名字>.py`，每个脚本同时把检查图渲染到 `art/source/previews/<分组>/`。没有装 Blender 时也可以用 PyPI 上的 `bpy==4.5.*`（Python 3.11）：`python -c "import bpy, runpy, sys; sys.argv=[sys.argv[1]]; runpy.run_path(sys.argv[0], run_name='__main__')" art/blender/build_<名字>.py`（要先 `import bpy`，`bmesh`/`mathutils` 才能导入；无显示器的机器用 `xvfb-run` 渲染检查图）。
 - 改完后在 Godot 里重新导入（`godot --headless --path . --import`）。贴图的 `.import` 已设为无损 + 生成 mipmap，glb 的 `.import` 已关闭自动 LOD，重新导入会保留这些设置。
 
 **约定**（所有 `build_*.py` 遵守，游戏代码依赖它们）：
@@ -420,6 +498,8 @@ art · 美术资源与生产管线
 - 行刑人头部不分材质区：眼窝、额头三只小眼、口腔、缝线的明暗烘焙在顶点色 `Col` 里（`head_color`），导出时 `vertex_color="ACTIVE"`，游戏里 `skin` 材质开启 `vertex_color_use_as_albedo`。
 - `kit.join()` 会把所有部件的 UV 统一成一层 `UVMap`（Godot 只读第一层 UV），只要有部件带 `Col` 就给其余部件补白色 `Col`。
 - **触手**一律用 `kit.tentacle()` 生成、材质名 `tentacle`：UV.x 绕一圈、UV.y 从根 0 到尖 1；顶点色 R = 摆动相位、G = 尖端摆幅（米 ×10）、B = 长度（米 ÷2）；`suckers` 参数决定吸盘那一面朝哪。游戏里由 `shaders/tentacle.gdshader` 做摆动。用到触手的 glb（`dealer.glb`、`room.glb`）导出时要带 `vertex_color="ACTIVE"`。
+- **行刑人的三个形态**（`build_dealer.py`，`FORM_NODES` 要和 `scripts/table_scene.gd` 的同名常量一致）：形态一「白面」= `Mask`（白瓷面具壳：头部正面平面网格投影到不带五官的光滑基本形 `base_front` 上、沿法线外推 2 厘米，边界顶点吸附到精确轮廓 `mask_contours`，所以轮廓和眼洞是光滑曲线；彩绘在顶点色里，材质 `porcelain` 和 `skin` 一样乘顶点色）+ `Hat`（高礼帽）+ `WatchChain`；形态二「裂面」= `MaskShard`（同一个面具沿锯齿裂口 `crack_x` 只留半张、歪斜挂着）+ `Beard` + `BackTentacles2` + `WatchChain`；形态三「深渊」= `Beard` + `BeardLong` + `Horns`（骨刺和骨角，材质 `bone`）+ `Veins`（发光血管，材质 `vein_glow`）+ `BackTentacles3` + `ChestRift`（肉唇、尖牙、黑洞）+ `ChestEye`（原点在眼球中心，游戏里让它朝向镜头）。头上的部件是 `Head` 的子节点、原点都在头部中心（游戏按它缩放做「长出来」）；其余是顶层节点，背后触手原点在根部 (0, 0.5, -1.47)。不在 `FORM_NODES` 里的节点所有形态都显示。检查图：`previews/dealer/player_view_form1..3.png`、`head_form1..3.png`。
+- **颜色属性要设成默认渲染颜色**：用 bmesh 图层建的颜色属性（`kit.tentacle()`、面具壳）只是「活动」不是「默认渲染」色，glTF 导出器会先写一层全白的 `COLOR_0`、真正的数据落到 `COLOR_1`，而 Godot 只读 `COLOR_0`——面具彩绘、触手的摆动相位/幅度都会丢。`kit.export_glb()` 导出前统一把活动颜色属性设为默认。
 - **房间里的克苏鲁元素**（`build_room.py` 的 `build_room()`）：后墙门左边的裂缝 `WallCrack`（破碎混凝土边、腐肉、黑色内腔）和从里面伸出的 `Tentacles`，左后角排水口 `FloorTentacles`，两组融化的仪式蜡烛 `Candles`（木箱顶上一组、排水口旁一组），左墙和后墙的血字 `Scrawl`，桌面中央的血色法阵（`Table` 的 `sigil` 面）。蜡烛火焰和裂缝的位置要和 `scripts/table_scene.gd` 的 `CANDLE_LIGHTS` / `CRACK_LIGHT_POS` 对齐。
 
 **贴图来源**：`art/source/` 里的原图都是 Codex 内置图像生成画的，品牌名均为虚构：概念参考图 8 张（含克苏鲁版行刑人正侧视、头部特写、房间氛围图）；可平铺材质 12 张（深海鳞皮 `skin_deep`、触手 `tentacle`、腐肉 `flesh` 等）；标签/贴花/特效 12 张（法阵 `sigil`、血字 `scrawl`、邪教海报 `poster_cult` 等）。`process_textures.py` 里 `decal` 模式把黑底颜料图转成半透明贴花。旧版的 `skin.png`、`poster.png` 原图保留但不再使用。
